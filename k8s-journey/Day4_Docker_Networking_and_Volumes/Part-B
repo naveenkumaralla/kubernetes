@@ -1,0 +1,95 @@
+Part B: Lab (75-90 min)
+
+Step 1: Observe default networking
+
+bash
+-----------------------
+docker network ls
+docker run -d --name c1 alpine sleep 3600
+docker run -d --name c2 alpine sleep 3600
+docker inspect -f '{{.NetworkSettings.IPAddress}}' c1 c2
+docker exec c1 ping -c 2 <IP-of-c2>      # works by IP
+docker exec c1 ping -c 2 c2              # fails: bad address
+-----------------------
+Check the host side: ip addr show docker0 and ip route.
+
+Step 2: Custom network with name resolution
+
+bash
+---------------------
+docker rm -f c1 c2
+docker network create labnet
+docker run -d --name c1 --network labnet alpine sleep 3600
+docker run -d --name c2 --network labnet alpine sleep 3600
+docker exec c1 ping -c 2 c2              # works by name now
+docker exec c1 cat /etc/resolv.conf       # Docker's embedded DNS at 127.0.0.11
+------------------------------------------------
+Step 3: A two-tier app (web + database)
+
+bash
+-------
+docker rm -f c1 c2
+docker run -d --name db --network labnet -e POSTGRES_PASSWORD=secret postgres:16
+docker run -d --name web --network labnet -p 5000:5000 YOURUSER/myapp:v1
+docker exec -it db psql -U postgres -c "select version();"
+docker exec web python -c "import socket; print(socket.gethostbyname('db'))"
+---------------------------------------------------
+The web container finds the database by the name db. No IPs hard-coded.
+
+Step 4: See the data loss problem
+
+bash
+-------------
+docker exec -it db psql -U postgres -c "create table notes(id int, txt text); insert into notes values (1,'hello');"
+docker exec -it db psql -U postgres -c "select * from notes;"
+docker rm -f db
+docker run -d --name db --network labnet -e POSTGRES_PASSWORD=secret postgres:16
+docker exec -it db psql -U postgres -c "select * from notes;"    # error: table doesn't exist
+-------------------------------------------
+The data died with the container (the Day 2 writable-layer lesson).
+
+Step 5: Fix it with a named volume
+
+bash
+---------
+docker rm -f db
+docker volume create pgdata
+docker run -d --name db --network labnet -e POSTGRES_PASSWORD=secret \
+  -v pgdata:/var/lib/postgresql/data postgres:16
+sleep 5
+docker exec -it db psql -U postgres -c "create table notes(id int, txt text); insert into notes values (1,'hello');"
+docker rm -f db
+docker run -d --name db --network labnet -e POSTGRES_PASSWORD=secret \
+  -v pgdata:/var/lib/postgresql/data postgres:16
+sleep 5
+docker exec -it db psql -U postgres -c "select * from notes;"     # data survived
+---------------------------------------------------------------------
+Inspect it: docker volume inspect pgdata and sudo ls /var/lib/docker/volumes/pgdata/_data.
+
+Step 6: Bind mount for live editing
+
+bash
+-------------
+mkdir -p ~/k8s-journey/html && echo "<h1>Hello from the host</h1>" > ~/k8s-journey/html/index.html
+docker run -d --name site -p 8081:80 -v ~/k8s-journey/html:/usr/share/nginx/html:ro nginx
+curl localhost:8081
+echo "<h1>Edited live</h1>" > ~/k8s-journey/html/index.html
+curl localhost:8081                      # changed without restarting
+--------------------------------------
+Step 7: See the iptables magic behind -p
+
+bash
+-----------
+sudo iptables -t nat -L DOCKER -n
+
+Find the DNAT rule for ports 5000 and 8081. Kubernetes kube-proxy uses the same mechanism for Services.
+------------------------------
+
+Step 8: Clean up
+
+bash
+------------
+docker rm -f $(docker ps -aq)
+docker network rm labnet
+docker volume rm pgdata
+--------------------------

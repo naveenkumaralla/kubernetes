@@ -1,0 +1,27 @@
+Part A: Theory (30-40 min)
+
+1. Docker network modes:
+
+bridge (default): a virtual switch (docker0) on the host. Containers get private IPs (172.17.x.x) and reach the outside via NAT.
+host: the container shares the host’s network stack (no isolation).
+none: no networking.
+
+2. Port publishing. -p HOST:CONTAINER creates iptables DNAT rules so outside traffic to the host port reaches the container.
+
+3. User-defined bridge networks give DNS by container name. On the default bridge, containers can’t resolve each other by name; on a custom network they can. This foreshadows Kubernetes Services and DNS in Week 3.
+
+4. Volumes and mounts:
+
+Named volume: managed by Docker (/var/lib/docker/volumes); best for databases.
+Bind mount: maps a host directory into the container; good for development.
+tmpfs: memory only.
+
+5. Why one host isn’t enough. After today you can run multi-container apps on one machine. Now ask what happens when:
+
+The host crashes (everything is down)
+You need more CPU than one machine has
+Containers on different machines must communicate
+You want to update with zero downtime
+You must decide which host runs which container
+
+You’d have to script all of this by hand. That gap is exactly what Kubernetes fills.

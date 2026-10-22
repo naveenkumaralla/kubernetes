@@ -1,0 +1,100 @@
+Part B: Lab (75-90 min)
+
+Step 1: Find the container’s process on the host
+------------------------------------------------------
+bash
+docker run -d --name sleeper alpine sleep 3600
+PID=$(docker inspect -f '{{.State.Pid}}' sleeper)
+echo $PID
+ps -fp $PID
+----------------------------------------------------------
+That sleep 3600 is an ordinary process, visible in the host’s process table.
+
+Step 2: Compare views
+---------------------------------------------------------------
+bash
+docker exec sleeper ps          # inside: sleep is PID 1
+ps -fp $PID                      # outside: it has a large PID
+---------------------------------------------------------------------
+Same process, two PIDs. That is the PID namespace.
+
+
+Step 3: Look at its namespaces
+--------------------------------------------------------------------
+bash
+sudo ls -l /proc/$PID/ns
+sudo ls -l /proc/$$/ns           # your own shell, for comparison
+sudo lsns -p $PID
+---------------------------------------------------------------------
+Compare the inode numbers. The pid, net, mnt, uts, and ipc entries differ between the container and your shell. That is the isolation.
+
+
+Step 4: Check the container’s network namespace
+------------------------------------------------------------------------
+bash
+sudo nsenter -t $PID -n ip addr
+-------------------------------------------------------------------------
+nsenter runs a command inside the container’s namespace from the host. You will see eth0 with a 172.17.x.x address, and the host’s interfaces are not visible.
+
+Step 5: Create your own “container” by hand
+------------------------------------------------------
+bash
+sudo unshare --pid --fork --mount-proc bash
+
+Inside the new shell:
+
+bash
+ps aux        # only 2-3 processes; bash is PID 1
+echo $$       # prints 1
+exit
+
+Now try the UTS namespace:
+
+bash
+sudo unshare --uts bash
+hostname demo-container
+hostname
+exit
+hostname      # your real hostname is unchanged
+---------------------------------------------------------------------
+You just did, in two commands, what Docker does automatically.
+
+Step 6: cgroups: set limits
+-------------------------------------------------------------------------------
+bash
+docker run -d --name limited -m 100m --cpus 0.5 alpine sleep 3600
+ID=$(docker inspect -f '{{.Id}}' limited)
+cat /sys/fs/cgroup/system.slice/docker-$ID.scope/memory.max
+cat /sys/fs/cgroup/system.slice/docker-$ID.scope/cpu.max
+
+Expect 104857600 (100 MB) and 50000 100000 (half a CPU). If the path doesn’t exist, run cat /proc/$(docker inspect -f '{{.State.Pid}}' limited)/cgroup to find your cgroup path. Older systems use cgroup v1 with different paths.
+-----------------------------------------------------------------------------------
+
+Step 7: Trigger an OOM kill on purpose
+-----------------------------------------------------------------------------
+bash
+docker run --rm -m 50m --memory-swap 50m python:3.12-alpine \
+  python -c "x = 'a' * (200*1024*1024); print('allocated')"
+echo "exit code: $?"
+
+Exit code 137 (128 + SIGKILL 9) means the kernel killed it. Check the kernel log: sudo dmesg | tail -5. You will see this again in Week 5 as OOMKilled in Kubernetes.
+----------------------------------------------------------------------------
+
+Step 8: See the layered filesystem
+---------------------------------------------------------------------------------
+bash
+docker inspect -f '{{json .GraphDriver.Data}}' sleeper | python3 -m json.tool
+
+Look for LowerDir, UpperDir, and MergedDir. Then:
+
+bash
+docker run -d --name writer alpine sh -c "echo hello > /data.txt; sleep 3600"
+docker diff writer       # shows A /data.txt, the file in the writable layer
+docker rm -f writer
+--------------------------------------------------------------------------------
+The file is gone with the container.
+
+Step 9: Clean up
+
+bash
+docker rm -f $(docker ps -aq)

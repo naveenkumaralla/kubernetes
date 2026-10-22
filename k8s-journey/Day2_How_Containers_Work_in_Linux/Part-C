@@ -1,0 +1,23 @@
+Part C: Checkpoint
+Which kernel feature controls what a container can see? Which controls what it can use?
+ANS: 
+What a container can SEE is controlled by Namespaces. This kernel feature isolates resources so a container thinks it is on its own machine. It restricts visibility into processes (pid), networks (net), storage mounts (mnt), and users (user).
+
+What a container can USE is controlled by Cgroups (Control Groups). This kernel feature sets hard limits on physical hardware consumption, preventing a container from crashing the host by hogging CPU, RAM, storage I/O, or network bandwidth.
+
+Why does ps show different PIDs inside and outside?
+ANS:
+This happens because of the PID Namespace.
+When a container starts, the kernel creates a new, isolated PID namespace for it. Inside this namespace, the container's main process is assigned PID 1 (making it the "root" process of the container). However, the host operating system tracks all processes globally. On the host system, that exact same process is assigned a completely different, standard system PID (like PID 4500).
+The host can see inside the container's fence, but the container cannot see outside it.
+
+What does exit code 137 mean?
+ANS:
+Exit code 137 means the container was abruptly and forcefully terminated by the Linux kernel using an OOM (Out of Memory) Kill via a SIGKILL signal (Signal 9).
+• The Math: In Linux, if a process is killed by a signal, its exit code is calculated as 128 + Signal Number. Since SIGKILL is signal 9, the result is 128 + 9 = 137.
+• Why it happens: The container breached the RAM limit assigned to it via its Cgroup, or the host itself completely ran out of memory, forcing the kernel to kill the container to protect the OS from freezing.
+
+Why is data lost when a container is deleted?
+ANS:
+Data is lost because a container's filesystem relies on an ephemeral read-write layer (usually managed via an overlay filesystem).
+The base container image is strictly read-only. When a container runs and creates or modifies a file, those changes are written to a temporary, top-level storage layer unique to that specific container instance. When you delete the container, the container engine destroys this ephemeral layer entirely. To keep data permanently, you must map a directory on the host machine to the container using a Volume or Bind Mount.

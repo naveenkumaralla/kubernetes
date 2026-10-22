@@ -1,0 +1,38 @@
+Day 1: Why Containers Exist
+Part A: Theory (30-40 min)
+
+1. The old way: physical servers. One application per server. You bought hardware for peak load, so most servers sat at 10-15% utilization. Applications also clashed: App A needs Python 2, App B needs Python 3, and installing both on one machine breaks something.
+
+2. Virtual machines (VMs). A hypervisor (VMware, KVM, VirtualBox) splits one physical server into several virtual servers. Each VM has its own full guest operating system with its own kernel. This fixed the isolation problem but is heavy:
+
+Each VM carries a whole OS (gigabytes of disk, a GB or more of RAM)
+Boot time is minutes
+You pay the OS overhead N times
+
+3. Containers. A container is not a mini-VM. It is a normal Linux process that the kernel has isolated so it sees only its own files, processes, and network. All containers on a host share the host's kernel.
+
+--------------- Virtual machine--------------------Container------------
+|Includes	|Full guest OS and kernel      |App and libraries only  |
+|Size		|	GBs		       |	MBs     	|
+|Startup	|	Minutes		       |Seconds or less         |
+|Isolation	|Strong (separate kernel)      |Good (shared kernel)    |
+|Densityper host|	Tens		       |Hundreds                |
+------------------------------------------------------------------------
+
+4. Why developers like containers. You package the app with everything it needs into an image. The same image runs identically on your laptop, on a test server, and in the cloud. This removes "works on my machine."
+
+5. Key vocabulary:
+
+Image: a read-only template (like a ZIP or a class)
+Container: a running instance of an image (like a process or an object)
+Registry: a store for images (Docker Hub, ECR, ACR)
+Docker Engine: the tool that builds images and runs containers
+
+6. The problem Kubernetes solves. Docker is fine for one machine. In production, though, you have questions like:
+
+A server died at 3 AM. Who restarts my containers on another server?
+Traffic spiked. How do I run 20 copies instead of 2?
+How do I update the app with no downtime?
+How do 50 containers on 10 servers find each other?
+
+Kubernetes answers all of these. Today, just remember: Docker runs containers on one machine. Kubernetes manages containers across many machines.

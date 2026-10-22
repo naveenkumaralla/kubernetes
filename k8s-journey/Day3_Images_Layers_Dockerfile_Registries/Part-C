@@ -1,0 +1,22 @@
+Part C: Checkpoint
+
+What is the difference between RUN and CMD?
+ANS:
+• RUN executes commands during the image build process. It runs tasks like installing packages or creating directories, and the results are permanently saved into a new layer of the image.
+• CMD specifies the default command that runs when a container starts from the image. It does not execute during the build stage and can be easily overridden when running the container.
+
+Why do we copy requirements.txt before app.py?
+ANS:
+We do this to take advantage of Docker’s build caching mechanism.
+Docker builds images layer by layer. If a layer's files haven't changed, Docker reuses the cached layer instead of rebuilding it. Because code files like app.py change frequently, placing COPY requirements.txt and RUN pip install first ensures that Docker only re-installs your dependencies when requirements.txt itself changes, saving significant build time.
+
+What is the full name of an image on Docker Hub?
+ANS:
+The full name of an image on Docker Hub follows this exact format:
+\(\text{[registry\_domain]/[username\_or\_org]/[repository\_name]:[tag]}\)
+For a standard public image on Docker Hub, a full name looks like docker.io/library/ubuntu:24.04 (or docker.io/yourusername/myapp:v1.0 for a personal image). If the registry domain is omitted, Docker defaults to docker.io.
+
+Why must Kubernetes nodes be able to reach a registry?
+ANS:
+Kubernetes nodes must be able to reach a container registry because nodes do not store your application images locally by default.
+When you deploy a Pod, the Kubernetes control plane tells a specific worker node to run that container. The container runtime (like containerd or CRI-O) on that specific node must actively pull (download) the image from the specified registry to spin up and run your application pods

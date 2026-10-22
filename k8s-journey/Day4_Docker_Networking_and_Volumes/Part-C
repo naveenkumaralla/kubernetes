@@ -1,0 +1,36 @@
+Part C: Checkpoint
+Why can containers resolve each other by name on labnet but not on the default bridge?
+ANS:
+• On labnet (User-defined Bridge): Docker includes a built-in, embedded DNS server for all custom user-defined networks. When you create a network like labnet, Docker automatically registers each container's name and alias to an internal DNS service. This allows containers to instantly resolve each other by name.
+• On the Default bridge: The default network does not support automatic service discovery or internal DNS resolution. It was designed for basic, isolated operations where containers must communicate strictly by IP address (or by using the legacy, deprecated --link flag)
+
+Named volume vs bind mount: when would you use each?
+ANS:
+_________________________________________________________________________________________________________________________________________________________________________
+|Feature			Named Volume										Bind Mount
+|Management	Completely managed by Docker in a dedicated directory (e.g., /var/lib/docker/volumes/).		Points directly to a specific, custom path on the host machine filesystem.
+|Portability	High; independent of the host filesystem layout and OS structure.				Low; dependent on hardcoded host directories and OS-specific permission formats.|
+_________________________________________________________________________________________________________________________________________________________________________
+
+
+When to use a Named Volume:
+
+• Production Data & Databases: Highly recommended for persistent data like PostgreSQL or MySQL databases where Docker safely isolates the data lifecycle.
+• Sharing Data: When multiple containers need to share read/write access to the same storage space simultaneously.
+• Backups & Cloud Storage: When you want to easily back up, restore, or migrate data using native Docker CLI commands or remote storage drivers.
+
+When to use a Bind Mount:
+
+• Local Development (Live-Reloading): When you want to mount your source code directory into a container so that any changes you make on your laptop instantly update the application without rebuilding the image.
+• Injecting System Configurations: Sharing specific host system files (like /etc/nginx/nginx.conf or SSL certificates) directly with the container.
+• Log Gathering: Accessing container logs directly from the host system filesystem using standard external tools.
+
+
+
+
+List three problems that appear when you run production workloads on a single Docker host.
+ANS:
+Running standalone Docker on a single host machine works fine for development but presents severe risks in production:
+1. Single Point of Failure (No High Availability): If the physical server crashes, experiences a hardware failure, or needs an operating system reboot, all your production applications go down simultaneously. There is no automated multi-host failover.
+2. Resource Contention & Bottlenecks: All containers share the single host's CPU, memory, and disk I/O. If one container gets hit by a traffic spike or suffers a memory leak, it can starve and crash the remaining containers on that same machine if strict resource limits aren't manually enforced.
+3. No Native Automated Horizontal Scaling: Docker natively lacks the orchestration logic to automatically scale up container instances across a cluster as traffic grows, or dynamically distribute the traffic load via built-in cluster-wide load balancers

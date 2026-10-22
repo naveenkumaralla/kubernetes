@@ -1,0 +1,22 @@
+This is where your Linux skills pay off. A container is a Linux process with three kernel features applied.
+
+#################################
+
+1. Namespaces: what a process can see. Each namespace type isolates one view of the system:
+----------------------------------------------------------
+Namespace	Isolates
+PID	Process IDs (the container’s first process is PID 1)
+NET	Network interfaces, IPs, routing, ports
+MNT	Mount points and filesystem view
+UTS	Hostname
+IPC	Shared memory, message queues
+USER	User and group IDs (root inside can be non-root outside)
+-----------------------------------------------------------
+
+2. cgroups (control groups): what a process can use. cgroups limit and account for CPU, memory, disk I/O, and process count. If a container exceeds its memory limit, the kernel OOM-kills it. Kubernetes requests and limits are built directly on this.
+
+3. Union (layered) filesystems. An image is a stack of read-only layers. When a container runs, Docker adds a thin writable layer on top using overlayfs. Reads fall through to the layers, writes go to the top layer, and the top layer disappears when the container is deleted. This is why container data is ephemeral, and why Kubernetes needs volumes.
+
+4. Summary equation:
+
+Container = Linux process + namespaces + cgroups + layered root filesystem

@@ -1,0 +1,16 @@
+Write a short note in your repo: the 10 commands you used and what each does.
+
+Part C: Checkpoint
+In one sentence, how is a container different from a VM?
+Ans: Container vs. VM: A container shares the host operating system's kernel, while a virtual machine runs a complete guest operating system on top of a hypervisor
+
+What does -p 8080:80 do?
+Ans:It forwards (maps) port 8080 on your host computer to port 80 inside the container.
+
+Why did curl disappear in Step 7?
+Ans: They used --rm to run the container and that option will remove the continer on exist. So It means container is went to exist and disposed and curl will be gone on exist. 
+
+Name two things Docker alone can’t do when a server dies.
+Ans: 
+1. Automatically reschedule or restart the containers on a different live server (this requires an orchestrator like Kubernetes or Docker Swarm).
+2. Automatically fail over or sync persistent volume data across to a separate physical machine

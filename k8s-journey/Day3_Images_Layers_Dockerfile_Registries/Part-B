@@ -1,0 +1,106 @@
+Part B: Lab (90 min)
+
+Step 1: Create a Docker Hub account at hub.docker.com. Remember your username (below, YOURUSER).
+
+Step 2: Create the app
+------------------------------------------------
+bash
+----
+mkdir -p ~/k8s-journey/myapp && cd ~/k8s-journey/myapp
+
+app.py:
+--------
+
+python
+--------
+from flask import Flask
+import socket
+
+app = Flask(__name__)
+
+@app.route("/")
+def hello():
+    return f"Hello from v1! Served by container: {socket.gethostname()}\n"
+
+app.run(host="0.0.0.0", port=5000)
+----------------------------------------
+requirements.txt:
+-------------------
+flask==3.0.3
+-------------------
+Step 3: Write the Dockerfile
+
+dockerfile
+-----------
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+EXPOSE 5000
+CMD ["python", "app.py"]
+-----------------------
+Note that requirements.txt is copied and installed before app.py. That is the cache rule in action.
+
+Step 4: Build and run
+
+bash
+-----
+docker build -t myapp:v1 .
+docker run -d --name app1 -p 5000:5000 myapp:v1
+curl localhost:5000
+
+You should see “Hello from v1!” plus a container ID as the hostname.
+
+Step 5: Examine the layers
+
+bash
+-----
+docker history myapp:v1
+docker images myapp
+----------------------
+Each line is a layer, with its size.
+
+Step 6: Prove the cache works
+
+Edit app.py (change “v1” to “v1.1”), then rebuild:
+
+bash
+-----
+docker build -t myapp:v1.1 .
+
+Watch the output: the base, requirements.txt, and pip install steps say CACHED. Only the COPY app.py layer rebuilds. Now move COPY app.py . above RUN pip install and rebuild twice, changing the code between. See how the slow pip install reruns every time. Put it back after.
+
+Step 7: Tag and push
+
+bash
+-----
+docker login
+docker tag myapp:v1 YOURUSER/myapp:v1
+docker push YOURUSER/myapp:v1
+
+Open hub.docker.com and confirm your repository exists.
+
+Step 8: Prove it works from the registry
+
+bash
+--------
+docker rm -f app1
+docker rmi myapp:v1 YOURUSER/myapp:v1
+docker run -d --name app2 -p 5000:5000 YOURUSER/myapp:v1
+curl localhost:5000
+-----------------------------
+Docker pulled your image from the registry, exactly what a Kubernetes node will do later.
+
+Step 9: Add a .dockerignore (good habit)
+
+__pycache__
+*.pyc
+.git
+
+Step 10: Clean up and commit
+
+bash
+-----
+docker rm -f app2
+cd ~/k8s-journey && git add . && git commit -m "day3: flask app and Dockerfile"

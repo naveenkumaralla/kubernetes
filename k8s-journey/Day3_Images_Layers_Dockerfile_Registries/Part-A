@@ -1,0 +1,21 @@
+Part A: Theory (30-40 min)
+
+1. Image layers. Each Dockerfile instruction (RUN, COPY, ADD) creates a layer. Layers are cached and shared between images, so ten images based on python:3.12-slim store that base only once.
+
+2. Dockerfile instructions you must know:
+
+ _______________________________________________________________________
+|Instruction		Purpose						|
+|FROM			Base image					|			
+|WORKDIR		Set working directory				|
+|COPY			Copy files from your machine into the image	|
+|RUN			Execute a command at build time			|
+|ENV			Set environment variables			|
+|EXPOSE			Document the port (informational)		|
+|CMD / ENTRYPOINT	Command to run when the container starts	|
+|________________________________________________________________________|
+3. Build cache rule. Docker rebuilds from the first changed instruction onward. So put things that change rarely (installing dependencies) before things that change often (your source code).
+
+4. Tags. name:tag identifies a version (myapp:v1). latest is just a default tag, not “the newest.” In Kubernetes, never rely on latest in real deployments.
+
+5. Registries. A registry stores images. Image name format: registry/user/repo:tag, such as docker.io/yourname/myapp:v1. Docker Hub is the default; clouds have their own (ECR, ACR, Artifact Registry). Kubernetes nodes pull images from a registry, so this step is required for everything later.

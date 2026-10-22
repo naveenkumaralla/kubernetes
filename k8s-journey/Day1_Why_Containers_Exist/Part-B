@@ -1,0 +1,88 @@
+Step 1: Install Docker
+
+-----------------------------------------------------------
+bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+newgrp docker          # applies the group in this shell (or log out and in)
+docker version
+--------------------------------------------------------------
+You should see both a Client and a Server section. If you see “permission denied”, the group change hasn’t applied yet; log out and back in.
+
+Step 2: Your first container
+--------------------------------------
+bash
+docker run hello-world
+--------------------------------------
+Read the output. It explains the steps Docker took: contacted the daemon, pulled the image, ran it, and streamed the output.
+
+Step 3: Run a web server in the background
+--------------------------------------
+bash
+docker run -d --name web -p 8080:80 nginx
+
+Flags: -d runs detached (background), --name names it, -p 8080:80 maps host port 8080 to container port 80.
+
+bash
+curl localhost:8080
+--------------------------------------
+You should get the “Welcome to nginx!” HTML.
+
+Step 4: Inspect it
+--------------------------------------
+bash
+docker ps                  # running containers
+docker ps -a               # all, including stopped
+docker logs web            # nginx access/error logs
+docker logs -f web         # follow live (Ctrl+C to quit); curl again in another terminal
+docker stats --no-stream   # CPU and memory use
+--------------------------------------
+Step 5: Get inside the container
+-------------------------------------
+bash
+docker exec -it web bash
+
+Inside, run:
+
+bash
+hostname
+cat /etc/os-release
+ls /
+ps aux          # may say "command not found" in a slim image; that's fine
+exit
+------------------------------------------
+Notice the container has its own hostname and filesystem, but it is not a full OS.
+
+Step 6: Lifecycle
+--------------------------------------------
+bash
+docker stop web
+docker ps -a        # status: Exited
+docker start web
+docker rm -f web    # force-remove
+--------------------------------------------
+Step 7: Run an interactive Linux in a container
+-------------------------------------------
+bash
+docker run -it --rm ubuntu bash
+# inside:
+apt update && apt install -y curl
+curl -I https://example.com
+exit
+
+--rm deletes the container on exit. Run it again: curl is gone, because every container starts fresh from the image. Containers are disposable. Remember this; it is central to Kubernetes.
+-----------------------------------------------
+Step 8: Compare size and speed
+----------------------------------------------
+bash
+docker images
+time docker run --rm alpine echo "started"
+------------------------------------------------
+Alpine is about 5 MB and starts in well under a second.
+
+Step 9: Clean up and save notes
+----------------------------------------------
+bash
+docker rm -f $(docker ps -aq) 2>/dev/null
+---------------------------------------------
+Write a short note in your repo: the 10 commands you used and what each does.
