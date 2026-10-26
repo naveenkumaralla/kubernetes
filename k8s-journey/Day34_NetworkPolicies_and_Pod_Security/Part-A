@@ -1,0 +1,113 @@
+==================================================================
+DAY 34 - PART A: THEORY
+NetworkPolicies and Pod Security
+Time: 45 minutes
+==================================================================
+
+PART 1: NETWORKPOLICIES
+=======================
+
+1. DEFAULT: EVERYTHING TALKS TO EVERYTHING
+------------------------------------------
+Any pod can reach any pod in any namespace (Day 13). A compromised
+frontend can connect straight to your database. NetworkPolicies are
+the firewall for pods.
+
+
+2. HOW THEY WORK
+----------------
+- A NetworkPolicy SELECTS pods (podSelector) and lists allowed
+  ingress (incoming) and/or egress (outgoing) traffic.
+- As soon as ANY policy selects a pod for a direction, that pod
+  becomes "isolated" for that direction: only explicitly allowed
+  traffic passes. Policies are additive (allow-lists).
+- Enforced by the CNI (Calico, Cilium ...). kind's default kindnet
+  historically did NOT enforce them: the objects are accepted and
+  silently ignored. That's why we use the Calico cluster today.
+
+
+3. DEFAULT DENY
+---------------
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: default-deny
+    namespace: shop
+  spec:
+    podSelector: {}              # all pods in namespace
+    policyTypes: [Ingress, Egress]
+    # no rules = nothing allowed
+
+
+4. ALLOW RULES
+--------------
+  spec:
+    podSelector:
+      matchLabels: {app: backend}       # applies to backend pods
+    policyTypes: [Ingress]
+    ingress:
+    - from:
+      - podSelector:
+          matchLabels: {app: frontend}  # from frontend pods (same ns)
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: monitoring   # from any pod in ns
+      ports:
+      - protocol: TCP
+        port: 8080
+
+Careful with YAML:
+  - from: [podSelector, namespaceSelector]  as TWO list items = OR
+  - one item with BOTH podSelector and namespaceSelector    = AND
+  ipBlock: {cidr: 10.0.0.0/8, except: [...]} for external IPs.
+
+
+5. DON'T FORGET DNS
+-------------------
+With egress default-deny, pods can't resolve names. Always allow
+UDP/TCP 53 to kube-dns in kube-system.
+
+
+PART 2: POD SECURITY
+====================
+
+6. securityContext
+------------------
+Pod/container settings that shrink what a compromised container can do:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+
+Dangerous settings: privileged: true, hostNetwork, hostPID, hostPath,
+adding capabilities like SYS_ADMIN, NET_ADMIN.
+
+
+7. POD SECURITY ADMISSION (PSA)
+-------------------------------
+Built-in admission controller. Label a namespace with a level:
+  privileged   no restrictions
+  baseline     blocks the obvious escalations (privileged, hostPath,
+               hostNetwork ...)
+  restricted   best practice: non-root, drop ALL caps, seccomp,
+               no privilege escalation
+
+Modes: enforce (reject), audit (log), warn (show warning)
+  k label ns shop pod-security.kubernetes.io/enforce=restricted
+
+For custom rules (e.g. "images only from our registry", "must have
+resource limits"), use policy engines: Kyverno or OPA Gatekeeper
+(Week 9).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- NetworkPolicies are allow-lists; need an enforcing CNI.
+- Start with default deny, then allow, and remember DNS.
+- Run as non-root, drop capabilities, read-only root FS.
+- PSA levels: privileged / baseline / restricted.

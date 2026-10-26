@@ -1,0 +1,27 @@
+==================================================================
+DAY 15 - PART C: CHECKPOINT
+==================================================================
+
+1. State the three rules of the Kubernetes network model.
+Ans:
+
+
+2. What creates the pod's network interface and assigns its IP?
+Ans:
+
+
+3. What is a PodCIDR? What was the PodCIDR of lab-worker?
+Ans:
+
+
+4. How does a packet get from a pod on node 1 to a pod on node 2 in
+   kind?
+Ans:
+
+
+5. Why must you never hard-code a pod IP?
+Ans:
+
+
+6. Name the three IP ranges in a cluster.
+Ans:

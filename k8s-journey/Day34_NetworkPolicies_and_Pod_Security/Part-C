@@ -1,0 +1,33 @@
+==================================================================
+DAY 34 - PART C: CHECKPOINT
+==================================================================
+
+1. What makes a pod "isolated" for ingress?
+Ans:
+
+
+2. Why did we need Calico for this lab?
+Ans:
+
+
+3. Why did everything break after the egress deny, even inside the
+   namespace?
+Ans:
+
+
+4. In a "from:" list, what is the difference between two items
+   (podSelector) (namespaceSelector) and one item with both?
+Ans:
+
+
+5. List five securityContext settings that harden a container.
+Ans:
+
+
+6. What are the three Pod Security levels? Which did root-pod violate?
+Ans:
+
+
+7. What tool would you use for custom rules like "only images from our
+   registry"?
+Ans:

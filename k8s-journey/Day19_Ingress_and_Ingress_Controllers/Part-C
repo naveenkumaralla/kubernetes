@@ -1,0 +1,32 @@
+==================================================================
+DAY 19 - PART C: CHECKPOINT
+==================================================================
+
+1. What is the difference between an Ingress and an ingress
+   controller?
+Ans:
+
+
+2. Why is one Ingress cheaper than many LoadBalancer Services?
+Ans:
+
+
+3. Prefix vs Exact pathType: give an example where they differ.
+Ans:
+
+
+4. Why did curl return 404 right after installing the controller?
+Ans:
+
+
+5. What does ingressClassName do?
+Ans:
+
+
+6. What is the Gateway API and why does it matter now?
+Ans:
+
+
+7. Draw the path of a request from curl on your machine to the apple
+   pod.
+Ans:

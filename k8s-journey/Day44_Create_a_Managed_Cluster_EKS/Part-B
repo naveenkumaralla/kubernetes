@@ -1,0 +1,101 @@
+==================================================================
+DAY 44 - PART B: LAB
+Create, explore, and delete an EKS cluster
+Time: 90 minutes (cluster creation alone takes ~15-20 minutes)
+==================================================================
+
+STEP 1: Create the cluster
+--------------------------
+cd ~/k8s-journey/cloud/eks
+time eksctl create cluster -f cluster.yaml
+
+While it runs (15-20 min), open the AWS console:
+  CloudFormation -> watch the two stacks being created
+  VPC -> the new VPC, its subnets, NAT gateway, route tables
+  EKS -> cluster "lab"
+
+
+STEP 2: Connect
+---------------
+eksctl wrote your kubeconfig. Check:
+  kubectx
+  k config current-context
+  k get nodes -o wide
+  k get nodes -L topology.kubernetes.io/zone,node.kubernetes.io/instance-type,eks.amazonaws.com/nodegroup
+
+If needed: aws eks update-kubeconfig --region ap-south-1 --name lab
+
+
+STEP 3: What's running?
+-----------------------
+k get pods -A -o wide
+k get ds -n kube-system
+k get deploy -n kube-system
+eksctl get addons --cluster lab
+
+Note: aws-node (VPC CNI), kube-proxy, coredns, ebs-csi-*,
+eks-pod-identity-agent. NO apiserver/etcd/scheduler pods.
+
+
+STEP 4: Pods get VPC IPs
+------------------------
+k create deploy web --image=nginx:1.27 --replicas=4
+k get pods -o wide
+aws ec2 describe-subnets --filters "Name=tag:alpha.eksctl.io/cluster-name,Values=lab" \
+  --query 'Subnets[].{AZ:AvailabilityZone,CIDR:CidrBlock,Free:AvailableIpAddressCount}' --output table
+
+Pod IPs are from the private subnets' ranges, the same network as
+the nodes. Check how many pods a t3.medium can run:
+  k get node -o jsonpath='{.items[0].status.allocatable.pods}{"\n"}'     # 17 (ENI/IP limit)
+
+
+STEP 5: Who am I in Kubernetes?
+-------------------------------
+aws sts get-caller-identity
+k auth whoami
+aws eks list-access-entries --cluster-name lab
+k config view --minify | grep -A10 exec:
+
+
+STEP 6: Spread across zones
+---------------------------
+k scale deploy web --replicas=6
+k get pods -o wide
+k get nodes -L topology.kubernetes.io/zone
+Add a topologySpreadConstraint with topologyKey
+topology.kubernetes.io/zone to the Deployment (k edit deploy web) and
+check that replicas are balanced between zones.
+
+
+STEP 7: Scale the node group
+----------------------------
+eksctl get nodegroup --cluster lab
+eksctl scale nodegroup --cluster lab --name ng-1 --nodes 3
+k get nodes -w          # new node joins in 2-3 minutes
+eksctl scale nodegroup --cluster lab --name ng-1 --nodes 2
+
+
+STEP 8: Look at it in the console
+---------------------------------
+EKS console -> lab -> Resources / Compute / Networking / Add-ons /
+Access. EC2 console -> Instances (your nodes) and Auto Scaling Groups.
+
+
+STEP 9: DELETE THE CLUSTER
+--------------------------
+k delete deploy web
+eksctl delete cluster -f cluster.yaml --wait
+Check in the console: CloudFormation stacks deleted, no EC2
+instances, no NAT gateway, no Elastic IPs left.
+  aws ec2 describe-nat-gateways --query 'NatGateways[?State!=`deleted`].NatGatewayId'
+  aws ec2 describe-addresses --query 'Addresses[].PublicIp'
+
+
+STEP 10: AKS / GKE equivalents
+------------------------------
+AKS: az aks create ... ; az aks get-credentials ... ; az aks nodepool scale
+     -g lab-rg --cluster-name lab -n nodepool1 -c 3 ; az group delete
+GKE: gcloud container clusters create ... ; gcloud container clusters resize
+     lab --node-pool default-pool --num-nodes 2 --region asia-south1 ; delete
+
+cd ~/k8s-journey && git add . && git commit -m "day44: first eks cluster"

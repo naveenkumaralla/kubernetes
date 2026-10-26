@@ -1,0 +1,58 @@
+==================================================================
+DAY 44 - PART A: THEORY
+How a Managed Cluster Is Structured
+Time: 30-40 minutes
+==================================================================
+
+1. WHAT eksctl CREATES
+----------------------
+Two CloudFormation stacks:
+  eksctl-lab-cluster        VPC, subnets (public + private in each AZ),
+                            Internet Gateway, NAT gateway, route tables,
+                            security groups, IAM role for the control
+                            plane, the EKS cluster itself
+  eksctl-lab-nodegroup-ng-1 IAM role for nodes, launch template,
+                            Auto Scaling Group of EC2 instances
+Plus add-ons (vpc-cni, coredns, kube-proxy, pod identity agent, EBS
+CSI) and an OIDC provider for IRSA.
+
+
+2. CONTROL PLANE YOU CAN'T SEE
+------------------------------
+The API servers and etcd run in an AWS-owned account across 3 AZs.
+You get an HTTPS endpoint. "k get pods -n kube-system" shows NO
+apiserver/etcd/scheduler pods, only node-level add-ons.
+
+
+3. NODE GROUPS
+--------------
+Managed node group = EKS-managed Auto Scaling Group of EC2 instances
+running an EKS-optimized OS (Amazon Linux 2023 or Bottlerocket).
+min/desired/max size; upgrades by replacing nodes with drain.
+Alternatives:
+  Self-managed nodes   your own ASG, full control
+  Fargate              serverless pods (no nodes to manage, limits)
+  EKS Auto Mode        AWS manages nodes, scaling, core add-ons
+  Karpenter            provisions right-sized nodes on demand
+GKE Autopilot and AKS Automatic are similar "nodeless" modes.
+
+
+4. KUBECONFIG FOR EKS
+---------------------
+eksctl (or "aws eks update-kubeconfig") adds a context whose user
+runs "aws eks get-token". Your IAM identity becomes your Kubernetes
+identity. The creator gets cluster-admin via an "access entry".
+
+
+5. MULTI-AZ
+-----------
+Nodes are spread over AZs; each node has the label
+topology.kubernetes.io/zone. Use topologySpreadConstraints (Week 5)
+to spread replicas across zones for high availability.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- eksctl = CloudFormation stacks: cluster/VPC + node group.
+- No control plane pods visible.
+- Access = IAM identity -> access entry -> Kubernetes permissions.

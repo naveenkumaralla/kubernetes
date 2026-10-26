@@ -1,0 +1,87 @@
+==================================================================
+DAY 43 - PART A: THEORY
+Managed Kubernetes and the Cloud Basics You Need
+Time: 45 minutes
+==================================================================
+
+THIS WEEK USES AWS (EKS). Equivalent AKS (Azure) and GKE (Google)
+commands are listed in each day's lab. The concepts are the same.
+
+COST WARNING: Cloud clusters cost money every hour they exist.
+Our lab cluster (control plane + 2 small nodes + NAT gateway + load
+balancers) is roughly USD 0.30-0.50 per hour. Delete everything at the
+end of EVERY day. Set a budget alert TODAY before anything else.
+
+
+1. SELF-MANAGED vs MANAGED
+--------------------------
+                     kubeadm (Week 6)        EKS / AKS / GKE
+  Control plane      you run, patch, back up provider runs it (HA,
+                                             etcd backups, upgrades)
+  You pay for        your servers            control plane fee (EKS
+                                             ~0.10 USD/h) + nodes
+  Worker nodes       you                     node groups / node pools
+                                             (VMs you choose), or
+                                             serverless (Fargate,
+                                             Autopilot, EKS Auto Mode)
+  Integrations       you install             LB, disks, IAM, logs
+                                             built in
+  Access             SSH to control plane    no access to control
+                                             plane machines at all
+Almost all cloud production uses managed services.
+
+
+2. CLOUD NETWORKING (VPC)
+-------------------------
+  VPC              your private network in a region (e.g. 10.0.0.0/16)
+  Region / AZ      Mumbai = ap-south-1; AZs ap-south-1a/b/c are
+                   separate data centres. Spread nodes over 2-3 AZs.
+  Subnets          slices of the VPC in ONE AZ
+    public subnet  has a route to an Internet Gateway (load balancers)
+    private subnet no direct inbound internet; outbound via a NAT
+                   gateway (worker nodes live here)
+  Security groups  stateful firewalls on network interfaces
+
+EKS networking: the AWS VPC CNI gives each POD a real VPC IP from the
+node's subnet (Day 20). Pods are routable in the VPC without overlay,
+but you can run out of subnet IPs; plan CIDRs big enough.
+
+
+3. CLOUD IAM
+------------
+Two separate questions:
+  a) Who can use the CLUSTER (kubectl)?
+     EKS: IAM users/roles mapped to Kubernetes permissions through
+          "access entries" (older: aws-auth ConfigMap).
+     AKS: Microsoft Entra ID + Azure RBAC or Kubernetes RBAC.
+     GKE: Google IAM + Kubernetes RBAC.
+  b) What can PODS do in the cloud (read S3, write to a queue)?
+     Workload identity: a Kubernetes ServiceAccount is linked to a
+     cloud IAM role (EKS Pod Identity / IRSA, AKS Workload Identity,
+     GKE Workload Identity). No static keys. (Day 47)
+
+
+4. THE TOOLS
+------------
+  aws CLI      talk to AWS
+  eksctl       create/delete EKS clusters with one command or a YAML
+               file (uses CloudFormation behind the scenes)
+  kubectl      same as always
+  helm         package manager (used this week for add-ons; deep dive
+               in Week 8)
+Production teams usually use Terraform/OpenTofu instead of eksctl.
+
+
+5. WHAT A MANAGED CLUSTER STILL LEAVES TO YOU
+---------------------------------------------
+Node OS updates (node group upgrades), add-ons (CNI, CSI drivers,
+CoreDNS versions), autoscaling setup, ingress/LB controllers,
+observability, backups of your apps' data, security policies, cost.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Provider runs the control plane; you run nodes and add-ons.
+- Nodes in private subnets across AZs; LBs in public subnets.
+- Cluster access IAM vs pod IAM are different things.
+- Budget alert first, delete everything daily.

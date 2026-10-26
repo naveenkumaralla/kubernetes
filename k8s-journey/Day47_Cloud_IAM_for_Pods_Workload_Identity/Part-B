@@ -1,0 +1,125 @@
+==================================================================
+DAY 47 - PART B: LAB
+Give a pod S3 access without any keys
+Time: 90 minutes
+==================================================================
+
+STEP 1: Cluster and a bucket
+----------------------------
+cd ~/k8s-journey/cloud/eks && eksctl create cluster -f cluster.yaml
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+BUCKET=k8s-lab-$ACCOUNT-$RANDOM ; echo $BUCKET
+aws s3 mb s3://$BUCKET --region ap-south-1
+echo "hello from s3" > hello.txt && aws s3 cp hello.txt s3://$BUCKET/
+
+
+STEP 2: A pod WITHOUT permissions
+---------------------------------
+k create ns demo
+k run nocreds -n demo --image=amazon/aws-cli --command -- sleep 3600
+k exec -n demo nocreds -- aws sts get-caller-identity
+k exec -n demo nocreds -- aws s3 ls s3://$BUCKET
+Note: it may show the NODE role identity (via instance metadata) and be
+denied for S3. Production clusters also block pod access to instance
+metadata (IMDS hop limit 1 / IMDSv2) so pods can't borrow node
+credentials.
+
+
+STEP 3: IAM policy scoped to ONE bucket
+---------------------------------------
+cat > s3-read-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Effect": "Allow", "Action": ["s3:ListBucket"], "Resource": "arn:aws:s3:::$BUCKET"},
+    {"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": "arn:aws:s3:::$BUCKET/*"}
+  ]
+}
+EOF
+aws iam create-policy --policy-name lab-s3-read --policy-document file://s3-read-policy.json
+
+
+STEP 4: EKS Pod Identity association
+------------------------------------
+k create sa s3-reader -n demo
+eksctl create podidentityassociation --cluster lab --namespace demo \
+  --service-account-name s3-reader \
+  --permission-policy-arns arn:aws:iam::$ACCOUNT:policy/lab-s3-read
+eksctl get podidentityassociation --cluster lab
+(eksctl creates an IAM role trusted by pods.eks.amazonaws.com.)
+
+
+STEP 5: A pod WITH the ServiceAccount
+-------------------------------------
+k run reader -n demo --image=amazon/aws-cli \
+  --overrides='{"spec":{"serviceAccountName":"s3-reader"}}' --command -- sleep 3600
+k exec -n demo reader -- env | grep AWS_
+k exec -n demo reader -- aws sts get-caller-identity       # the new role!
+k exec -n demo reader -- aws s3 ls s3://$BUCKET
+k exec -n demo reader -- aws s3 cp s3://$BUCKET/hello.txt -
+k exec -n demo reader -- sh -c "echo x > /tmp/x && aws s3 cp /tmp/x s3://$BUCKET/x"   # AccessDenied (read-only)
+k exec -n demo reader -- aws s3 ls                           # AccessDenied (other buckets)
+
+No keys anywhere: credentials are temporary and rotate automatically.
+
+
+STEP 6 (COMPARE): IRSA
+----------------------
+eksctl create iamserviceaccount --cluster lab --namespace demo --name s3-reader-irsa \
+  --attach-policy-arn arn:aws:iam::$ACCOUNT:policy/lab-s3-read --approve
+k get sa s3-reader-irsa -n demo -o yaml | grep role-arn
+k run irsa -n demo --image=amazon/aws-cli \
+  --overrides='{"spec":{"serviceAccountName":"s3-reader-irsa"}}' --command -- sleep 3600
+k exec -n demo irsa -- env | grep -E "AWS_ROLE_ARN|AWS_WEB_IDENTITY_TOKEN_FILE"
+k exec -n demo irsa -- aws s3 ls s3://$BUCKET
+Look at the IAM role's trust policy in the console: it trusts the OIDC
+provider and the exact SA subject.
+
+
+STEP 7 (OPTIONAL): External Secrets Operator
+--------------------------------------------
+aws secretsmanager create-secret --name lab/db --secret-string '{"password":"fromAWS"}'
+helm repo add external-secrets https://charts.external-secrets.io
+helm install external-secrets external-secrets/external-secrets -n external-secrets --create-namespace
+Create a policy allowing secretsmanager:GetSecretValue on that secret,
+associate it with a ServiceAccount "eso" in demo (Step 4 method), then:
+
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata: {name: aws, namespace: demo}
+spec:
+  provider:
+    aws:
+      service: SecretsManager
+      region: ap-south-1
+      auth:
+        jwt:
+          serviceAccountRef: {name: eso}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: db, namespace: demo}
+spec:
+  refreshInterval: 1m
+  secretStoreRef: {name: aws, kind: SecretStore}
+  target: {name: db-secret}
+  data:
+  - secretKey: password
+    remoteRef: {key: lab/db, property: password}
+
+(If your installed version only serves v1beta1, change apiVersion.
+With Pod Identity the jwt auth block may be omitted; follow the ESO
+AWS docs for your version.)
+k get externalsecret -n demo ; k get secret db-secret -n demo -o jsonpath='{.data.password}' | base64 -d
+aws secretsmanager delete-secret --secret-id lab/db --force-delete-without-recovery
+
+
+STEP 8: CLEAN UP
+----------------
+aws s3 rb s3://$BUCKET --force
+eksctl delete podidentityassociation --cluster lab --namespace demo --service-account-name s3-reader
+eksctl delete iamserviceaccount --cluster lab --namespace demo --name s3-reader-irsa
+eksctl delete cluster -f ~/k8s-journey/cloud/eks/cluster.yaml --wait
+aws iam delete-policy --policy-arn arn:aws:iam::$ACCOUNT:policy/lab-s3-read
+
+cd ~/k8s-journey && git add . && git commit -m "day47: workload identity"

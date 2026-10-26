@@ -1,0 +1,29 @@
+==================================================================
+DAY 49 - PART C: WEEK 7 SELF-TEST
+==================================================================
+
+1. List the five biggest cost items of an EKS cluster.
+Ans:
+
+
+2. Why must LoadBalancer Services and PVCs be deleted before the
+   cluster?
+Ans:
+
+
+3. Total time for up.sh, and approximate session cost:
+Ans:
+
+
+4. Pick five items from the production checklist and explain why
+   each matters.
+Ans:
+
+
+5. Map these to AKS and GKE: ECR, EBS CSI, ALB Ingress, Pod Identity,
+   Cluster Autoscaler.
+Ans:
+
+
+6. Mistakes log: one cloud error this week and its fix.
+Ans:

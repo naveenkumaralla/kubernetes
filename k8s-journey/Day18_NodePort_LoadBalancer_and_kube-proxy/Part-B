@@ -1,0 +1,129 @@
+==================================================================
+DAY 18 - PART B: LAB
+Expose with NodePort and LoadBalancer, read the iptables rules
+Time: 75-90 minutes
+==================================================================
+
+cd ~/k8s-journey/manifests/week3
+k apply -f backend.yaml -f backend-svc.yaml
+
+
+STEP 1: NodePort Service
+------------------------
+vi backend-nodeport.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-np
+spec:
+  type: NodePort
+  selector:
+    app: backend
+  ports:
+  - port: 80
+    targetPort: 8080
+    nodePort: 30080
+
+k apply -f backend-nodeport.yaml
+k get svc backend-np
+
+PORT(S) shows 80:30080/TCP. It also has a ClusterIP.
+
+
+STEP 2: Reach it through any node
+---------------------------------
+k get nodes -o wide          # INTERNAL-IP of each node (172.18.0.x)
+for ip in $(k get nodes -o jsonpath='{.items[*].status.addresses[0].address}'); do
+  echo -n "$ip -> "; curl -s $ip:30080
+done
+
+Every node answers, even nodes with no backend pod.
+(Your host can reach 172.18.0.x because kind nodes are on a Docker
+network. On a real cluster you'd use the node IPs.)
+
+
+STEP 3: Read the iptables rules (kube-proxy)
+--------------------------------------------
+docker exec -it lab-worker bash
+
+  iptables -t nat -L KUBE-SERVICES -n | grep backend
+  iptables -t nat -L KUBE-NODEPORTS -n | grep 30080
+
+Follow the chain. Copy the KUBE-SVC-XXXX name:
+  iptables -t nat -L KUBE-SVC-XXXX -n
+You'll see one line per endpoint with "statistic mode random
+probability 0.333..." etc.
+
+  iptables -t nat -L KUBE-SEP-YYYY -n
+-> DNAT to a pod IP:8080
+
+  exit
+
+(If your cluster uses nftables mode: docker exec lab-worker nft list
+ruleset | grep -A3 backend)
+
+Check kube-proxy's mode:
+  k logs -n kube-system -l k8s-app=kube-proxy --tail=50 | grep -i proxier
+
+
+STEP 4: Scale and watch the probabilities change
+------------------------------------------------
+k scale deploy backend --replicas=4
+docker exec lab-worker iptables -t nat -L KUBE-SVC-XXXX -n
+Now 0.25, 0.333, 0.5, and the last one takes the remainder.
+
+
+STEP 5: externalTrafficPolicy: Local
+------------------------------------
+k scale deploy backend --replicas=1
+k get pods -l app=backend -o wide          # which node?
+k patch svc backend-np -p '{"spec":{"externalTrafficPolicy":"Local"}}'
+for ip in $(k get nodes -o jsonpath='{.items[*].status.addresses[0].address}'); do
+  echo -n "$ip -> "; curl -s -m 2 $ip:30080 || echo "no answer"
+done
+
+Only the node that has the pod answers. Switch back:
+  k patch svc backend-np -p '{"spec":{"externalTrafficPolicy":"Cluster"}}'
+  k scale deploy backend --replicas=3
+
+
+STEP 6: LoadBalancer (pending in kind)
+--------------------------------------
+k expose deploy backend --name=backend-lb --type=LoadBalancer --port=80 --target-port=8080
+k get svc backend-lb
+
+EXTERNAL-IP = <pending>. Nothing in kind creates load balancers.
+Look: it already has a ClusterIP AND a NodePort.
+
+
+STEP 7 (OPTIONAL): Real LoadBalancer in kind with cloud-provider-kind
+---------------------------------------------------------------------
+cloud-provider-kind is an official kind add-on that acts like a cloud
+controller and gives LoadBalancer Services an IP.
+  Download the binary for your OS from
+    https://github.com/kubernetes-sigs/cloud-provider-kind/releases
+  tar -xzf cloud-provider-kind_*_linux_amd64.tar.gz
+  sudo install cloud-provider-kind /usr/local/bin/
+  sudo cloud-provider-kind            (leave running in a terminal)
+
+Then:
+  k get svc backend-lb -w            # EXTERNAL-IP appears
+  curl <EXTERNAL-IP>
+
+This is what EKS/AKS/GKE do for you with a real cloud LB (Week 7).
+
+
+STEP 8: port-forward vs NodePort vs LoadBalancer
+------------------------------------------------
+k port-forward svc/backend 8080:80 &
+curl localhost:8080
+kill %1
+
+Write in Part C when you'd use each.
+
+
+STEP 9: Clean up and commit
+---------------------------
+k delete svc backend-np backend-lb
+cd ~/k8s-journey && git add . && git commit -m "day18: nodeport, lb, kube-proxy"

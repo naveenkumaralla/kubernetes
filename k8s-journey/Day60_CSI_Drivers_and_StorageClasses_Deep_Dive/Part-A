@@ -1,0 +1,59 @@
+==================================================================
+DAY 60 - PART A: THEORY
+CSI Drivers and StorageClasses: How Storage Plugins Work
+Time: 40 minutes
+==================================================================
+
+1. CSI ARCHITECTURE
+-------------------
+A CSI driver has two parts:
+  Controller plugin (Deployment)   talks to the storage system:
+                                   CreateVolume, DeleteVolume,
+                                   ControllerPublish (attach),
+                                   CreateSnapshot, Expand
+  Node plugin (DaemonSet)          on each node: NodeStage (format,
+                                   mount to a global path),
+                                   NodePublish (bind-mount into the pod)
+
+Kubernetes "sidecar" containers next to the driver translate API
+objects into CSI calls:
+  external-provisioner   PVC -> CreateVolume -> PV
+  external-attacher      VolumeAttachment -> ControllerPublish
+  external-resizer       PVC size change -> Expand
+  external-snapshotter   VolumeSnapshot -> CreateSnapshot
+  node-driver-registrar  registers the node plugin with the kubelet
+  livenessprobe
+
+
+2. API OBJECTS
+--------------
+  CSIDriver          driver capabilities (attach required? fsGroup?)
+  CSINode            which drivers are on each node + limits (max
+                     volumes per node)
+  StorageClass       provisioner: <driver name> + parameters
+  VolumeAttachment   "attach volume X to node Y" (block drivers)
+  VolumeSnapshotClass / VolumeSnapshot / VolumeSnapshotContent
+
+
+3. THE FULL LIFECYCLE
+---------------------
+  PVC created -> external-provisioner -> CreateVolume -> PV bound
+  pod scheduled -> VolumeAttachment -> attach (cloud API)
+  kubelet -> NodeStage (format ext4/xfs, mount) -> NodePublish (bind
+             into pod's volume dir) -> container starts
+  pod deleted -> unpublish -> unstage -> detach
+  PVC deleted -> reclaimPolicy Delete -> DeleteVolume
+
+
+4. RWX WITH NFS
+---------------
+csi-driver-nfs creates a sub-directory per PV on an existing NFS
+server; many pods on many nodes can mount it read-write. Cloud
+equivalents: EFS CSI, Azure Files, Filestore.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Controller plugin (create/attach) + node plugin (mount).
+- Sidecars translate Kubernetes objects into CSI calls.
+- CSIDriver, CSINode, VolumeAttachment show what's happening.

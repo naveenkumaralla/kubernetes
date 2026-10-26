@@ -1,0 +1,91 @@
+==================================================================
+DAY 15 - PART B: LAB
+Pod IPs, routes, and veth pairs
+Time: 75-90 minutes
+==================================================================
+
+mkdir -p ~/k8s-journey/manifests/week3 && cd ~/k8s-journey/manifests/week3
+
+
+STEP 1: Run pods on different nodes
+-----------------------------------
+k create deploy net --image=nginx:1.27 --replicas=4
+k get pods -l app=net -o wide
+
+Note each pod's IP and NODE. Pods on the same node share a /24.
+
+
+STEP 2: Find the pod ranges
+---------------------------
+k get nodes -o custom-columns=NODE:.metadata.name,PODCIDR:.spec.podCIDR,IP:.status.addresses[0].address
+k cluster-info dump | grep -m1 -E "cluster-cidr|service-cluster-ip-range"
+
+
+STEP 3: Pod to pod (same node and different node)
+-------------------------------------------------
+k run tool --image=nicolaka/netshoot -- sleep infinity
+k get pod tool -o wide
+k get pods -l app=net -o wide
+
+k exec tool -- curl -s -o /dev/null -w "%{http_code}\n" <IP-of-a-net-pod-on-SAME-node>
+k exec tool -- curl -s -o /dev/null -w "%{http_code}\n" <IP-of-a-net-pod-on-OTHER-node>
+
+Both return 200. No NAT, no port mapping.
+
+Trace the path:
+  k exec tool -- traceroute -n <IP-on-other-node>
+
+
+STEP 4: Inside the pod's network namespace
+------------------------------------------
+k exec tool -- ip addr show eth0
+k exec tool -- ip route
+
+The pod sees one interface (eth0) and a default route via its node.
+
+
+STEP 5: On the node: veth pairs and routes
+------------------------------------------
+NODE=$(k get pod tool -o jsonpath='{.spec.nodeName}')
+docker exec $NODE ip addr | grep -A1 veth | head
+docker exec $NODE ip route
+
+You will see routes like:
+  10.244.1.0/24 via 172.18.0.3 dev eth0     <- pods on another node
+  10.244.2.5 dev vethXXXX scope host        <- a local pod
+
+This is kindnet doing simple routing (no overlay).
+
+
+STEP 6: Match a pod to its veth
+-------------------------------
+k exec tool -- cat /sys/class/net/eth0/iflink
+  -> prints a number N
+docker exec $NODE ip -o link | grep "^N:"
+That veth on the node is the other end of the pod's eth0.
+
+
+STEP 7: Capture traffic between pods
+------------------------------------
+Terminal 2:
+  k exec tool -- tcpdump -ni eth0 port 80 -c 6
+Terminal 1:
+  k exec tool -- curl -s <IP-of-a-net-pod> >/dev/null
+
+Source and destination are the real pod IPs: proof of "no NAT".
+
+
+STEP 8: Watch IPs change
+------------------------
+k get pods -l app=net -o wide
+k delete pod -l app=net
+k get pods -l app=net -o wide
+
+All new IPs. That is why we need Services tomorrow.
+
+
+STEP 9: Clean up and commit
+---------------------------
+k delete deploy net
+k delete pod tool
+cd ~/k8s-journey && git add . && git commit -m "day15: network model"

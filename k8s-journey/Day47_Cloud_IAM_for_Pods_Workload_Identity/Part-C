@@ -1,0 +1,26 @@
+==================================================================
+DAY 47 - PART C: CHECKPOINT
+==================================================================
+
+1. Why is putting AWS keys in a Kubernetes Secret a bad idea?
+Ans:
+
+
+2. Why is giving the node IAM role S3 access a bad idea?
+Ans:
+
+
+3. Explain how EKS Pod Identity gives a pod credentials.
+Ans:
+
+
+4. Pod Identity vs IRSA: how does each link the SA to the role?
+Ans:
+
+
+5. What did "aws sts get-caller-identity" return in the reader pod?
+Ans:
+
+
+6. What does the External Secrets Operator do?
+Ans:

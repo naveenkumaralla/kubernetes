@@ -1,0 +1,102 @@
+==================================================================
+DAY 19 - PART A: THEORY
+Ingress and Ingress Controllers
+Time: 30-40 minutes
+==================================================================
+
+1. THE PROBLEM
+--------------
+10 web apps with 10 LoadBalancer Services = 10 cloud load balancers =
+10 bills and 10 IPs. You want ONE entry point that routes by:
+  host:   shop.example.com  -> shop Service
+          api.example.com   -> api Service
+  path:   example.com/      -> frontend
+          example.com/api   -> backend
+plus TLS termination in one place.
+
+
+2. INGRESS = RULES, CONTROLLER = THE ENGINE
+-------------------------------------------
+Ingress (object)       Only a set of HTTP routing rules. Does nothing
+                       by itself.
+Ingress controller     A reverse proxy running in the cluster (NGINX,
+                       Traefik, HAProxy, cloud ALB) that watches
+                       Ingress objects and configures itself.
+
+  client -> LB/NodePort -> ingress controller pods -> Service -> pods
+
+Without a controller installed, Ingress objects are ignored.
+
+
+3. INGRESS YAML
+---------------
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: shop
+  spec:
+    ingressClassName: nginx
+    rules:
+    - host: shop.local
+      http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: frontend
+              port:
+                number: 80
+        - path: /api
+          pathType: Prefix
+          backend:
+            service:
+              name: backend
+              port:
+                number: 80
+    tls:
+    - hosts: [shop.local]
+      secretName: shop-tls     # Week 8 with cert-manager
+
+pathType:
+  Prefix   /api matches /api, /api/, /api/users
+  Exact    only exactly /api
+
+ingressClassName picks which controller handles this Ingress (you can
+run more than one).
+
+
+4. CONTROLLER-SPECIFIC FEATURES
+-------------------------------
+Rewrites, rate limits, auth, timeouts are set with ANNOTATIONS that
+are specific to each controller, e.g.
+  nginx.ingress.kubernetes.io/rewrite-target: /
+
+
+5. IMPORTANT NEWS: INGRESS-NGINX AND GATEWAY API
+------------------------------------------------
+The community "ingress-nginx" controller was retired in 2026 (no more
+updates or security fixes). It still works fine for LEARNING, and
+millions of clusters still run it, so this lab uses it. For new
+production work, teams choose either:
+  - another Ingress controller (Traefik, HAProxy, F5 NGINX, cloud
+    controllers like AWS Load Balancer Controller), or
+  - the GATEWAY API: the successor to Ingress. Objects: GatewayClass,
+    Gateway (the entry point), HTTPRoute (the rules). More expressive
+    and role-oriented.
+The concepts you learn today (host/path routing, TLS termination,
+controller watches objects) carry over directly.
+
+
+6. IN THE CLOUD (WEEK 7)
+------------------------
+Either: one LoadBalancer Service in front of the ingress controller,
+or a cloud controller that turns each Ingress into a cloud application
+load balancer (AWS ALB, GCP HTTP(S) LB, Azure App Gateway).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Ingress = rules; controller = proxy that applies them.
+- Route by host and path; terminate TLS once.
+- Gateway API is the modern successor.

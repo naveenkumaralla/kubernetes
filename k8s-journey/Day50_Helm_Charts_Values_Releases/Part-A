@@ -1,0 +1,74 @@
+==================================================================
+DAY 50 - PART A: THEORY
+Helm: Charts, Values, Releases
+Time: 40 minutes
+==================================================================
+
+Week 8 runs on your local kind cluster with the ingress controller
+(kind-ingress.yaml from Day 19). Cloud is optional on Day 56.
+
+
+1. THE PROBLEM HELM SOLVES
+--------------------------
+A real app = 10-30 YAML files (Deployment, Service, Ingress, ConfigMap,
+Secret, HPA, PDB, ServiceAccount, RBAC ...), slightly different per
+environment. Copying files per environment (Day 13) doesn't scale.
+Installing third-party software (Prometheus, cert-manager) from raw
+YAML is painful to upgrade.
+
+
+2. HELM CONCEPTS
+----------------
+  Chart       a package: templates + default values + metadata
+  Values      settings you pass in (values.yaml, --set, -f file)
+  Release     one installed instance of a chart in a namespace, with
+              a name (you can install the same chart many times)
+  Revision    each install/upgrade/rollback creates a numbered
+              revision (stored as a Secret in the namespace)
+  Repository  where charts are published (HTTP index or OCI registry)
+
+  templates + values  --render-->  plain Kubernetes YAML  --apply-->
+
+
+3. CHART LAYOUT
+---------------
+  mychart/
+    Chart.yaml          name, version (chart), appVersion (app)
+    values.yaml         defaults
+    templates/          Go templates -> YAML
+      deployment.yaml
+      service.yaml
+      _helpers.tpl      reusable snippets (names, labels)
+      NOTES.txt         printed after install
+    charts/             dependencies (subcharts)
+
+
+4. KEY COMMANDS
+---------------
+  helm repo add NAME URL ; helm repo update
+  helm search repo KEYWORD
+  helm show values CHART > values.yaml
+  helm install RELEASE CHART -n NS --create-namespace -f my-values.yaml
+  helm upgrade --install RELEASE CHART -f my-values.yaml   (idempotent)
+  helm list -A
+  helm get values|manifest RELEASE
+  helm history RELEASE
+  helm rollback RELEASE REVISION
+  helm uninstall RELEASE
+  helm template RELEASE CHART -f values.yaml   (render only, no install)
+  helm diff upgrade ...   (plugin: show changes before upgrading)
+
+OCI charts: helm install x oci://registry/path/chart --version 1.2.3
+
+
+5. VALUES PRECEDENCE (last wins)
+--------------------------------
+  chart values.yaml  <  -f file1.yaml  <  -f file2.yaml  <  --set k=v
+Pattern: values-dev.yaml, values-prod.yaml per environment.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Chart = package, values = settings, release = installed instance.
+- upgrade --install + values files per environment.
+- helm template shows exactly what will be applied.

@@ -1,0 +1,104 @@
+==================================================================
+DAY 22 - PART A: THEORY
+ConfigMaps: Separating Configuration from Images
+Time: 30-40 minutes
+==================================================================
+
+1. WHY SEPARATE CONFIG?
+-----------------------
+The same image should run in dev, test and prod. What changes between
+them is CONFIGURATION: database host, log level, feature flags, config
+files. If config is baked into the image you need a different image
+per environment. Bad.
+
+Rule (from the "12-factor app"): build once, configure per
+environment at runtime.
+
+
+2. WHAT IS A CONFIGMAP?
+-----------------------
+A namespaced object holding NON-SECRET key/value data:
+
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: app-config
+  data:
+    LOG_LEVEL: "debug"
+    DB_HOST: "postgres.db.svc.cluster.local"
+    app.properties: |
+      color=blue
+      max_items=50
+
+Max size: 1 MiB. Values are always strings (quote numbers/booleans).
+
+
+3. FOUR WAYS TO CREATE ONE
+--------------------------
+  k create cm app-config --from-literal=LOG_LEVEL=debug
+  k create cm app-config --from-file=app.properties
+  k create cm app-config --from-env-file=app.env
+  YAML + k apply   (preferred: stored in Git)
+
+
+4. THREE WAYS TO USE ONE IN A POD
+---------------------------------
+a) Single env var:
+     env:
+     - name: LOG_LEVEL
+       valueFrom:
+         configMapKeyRef:
+           name: app-config
+           key: LOG_LEVEL
+
+b) All keys as env vars:
+     envFrom:
+     - configMapRef:
+         name: app-config
+
+c) Mounted as files (each key becomes a file):
+     volumes:
+     - name: cfg
+       configMap:
+         name: app-config
+     containers:
+     - volumeMounts:
+       - name: cfg
+         mountPath: /etc/app        -> /etc/app/LOG_LEVEL, /etc/app/app.properties
+
+   Mount only one key at a specific path with "subPath" (but subPath
+   mounts do NOT get updates).
+
+
+5. WHAT HAPPENS WHEN A CONFIGMAP CHANGES?
+-----------------------------------------
+  Env vars        NOT updated. Read once at container start.
+                  -> need a restart (k rollout restart deploy/x)
+  Mounted files   Updated automatically after ~1 minute (kubelet sync).
+                  The app must re-read the file to notice.
+  subPath mounts  NOT updated.
+
+Common pattern: put a hash of the config in a pod annotation so any
+config change triggers a rollout (Helm does this, Week 8).
+
+
+6. IMMUTABLE CONFIGMAPS
+-----------------------
+  immutable: true
+Can't be changed (only deleted/recreated). Protects against accidents
+and reduces API load in big clusters. Use versioned names:
+app-config-v2.
+
+
+7. ENVIRONMENT FROM THE POD ITSELF (DOWNWARD API)
+-------------------------------------------------
+You used this on Day 16 (POD_NAME). Other fields:
+  metadata.namespace, status.podIP, spec.nodeName,
+  requests/limits via resourceFieldRef.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Build once, configure at runtime.
+- env / envFrom / volume mount.
+- Env vars need a restart; mounted files update (~1 min).

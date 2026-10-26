@@ -1,0 +1,62 @@
+==================================================================
+DAY 58 - PART A: THEORY
+Queue Workers Autoscaled with KEDA
+Time: 40 minutes
+==================================================================
+
+1. WHY HPA ON CPU ISN'T ENOUGH
+------------------------------
+A worker waiting on a queue uses almost no CPU, even with 10,000
+messages waiting. The right signal is QUEUE LENGTH (or lag). And when
+the queue is empty, you'd like ZERO workers (HPA's minimum is 1).
+
+
+2. KEDA (Kubernetes Event-Driven Autoscaling)
+---------------------------------------------
+- Installs an operator + a metrics adapter.
+- ScaledObject: scales a Deployment/StatefulSet by event sources
+  (60+ scalers: Redis, RabbitMQ, Kafka, SQS, Azure Service Bus,
+  Prometheus queries, cron, HTTP ...).
+- Handles 0 <-> 1 itself; from 1 to N it creates and drives an HPA.
+- ScaledJob: creates Jobs per batch of messages instead (long tasks).
+
+  apiVersion: keda.sh/v1alpha1
+  kind: ScaledObject
+  metadata:
+    name: worker
+  spec:
+    scaleTargetRef:
+      name: worker              # Deployment name
+    minReplicaCount: 0
+    maxReplicaCount: 10
+    pollingInterval: 5
+    cooldownPeriod: 30          # seconds idle before scaling to 0
+    triggers:
+    - type: redis
+      metadata:
+        address: redis.queue.svc.cluster.local:6379
+        listName: jobs
+        listLength: "5"         # target messages per replica
+
+desired replicas ~ queue length / listLength
+
+
+3. CLOUD AUTHENTICATION
+-----------------------
+For SQS / Service Bus / Pub/Sub, KEDA uses TriggerAuthentication with
+workload identity (Pod Identity / IRSA / Azure WI), not keys.
+
+
+4. DESIGN TIPS
+--------------
+- Graceful shutdown: on SIGTERM finish the current message, then exit
+  (terminationGracePeriodSeconds long enough).
+- Don't lose messages: ack after processing; dead-letter queues for
+  poison messages.
+- Scale-to-zero adds start-up latency for the first message.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Scale workers on queue length, not CPU.
+- KEDA ScaledObject (Deployments) / ScaledJob (Jobs); supports zero.

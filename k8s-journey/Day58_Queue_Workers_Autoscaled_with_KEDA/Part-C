@@ -1,0 +1,23 @@
+==================================================================
+DAY 58 - PART C: CHECKPOINT
+==================================================================
+
+1. Why is CPU a poor scaling signal for queue workers?
+Ans:
+
+
+2. Who handles 0 -> 1 scaling and who handles 1 -> N?
+Ans:
+
+
+3. With listLength 5 and 100 messages, how many replicas did you
+   expect, and how many did you get? Why?
+Ans:
+
+
+4. ScaledObject vs ScaledJob: when would you use each?
+Ans:
+
+
+5. How should a worker handle SIGTERM?
+Ans:

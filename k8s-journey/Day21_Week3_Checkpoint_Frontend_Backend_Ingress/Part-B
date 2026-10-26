@@ -1,0 +1,143 @@
+==================================================================
+DAY 21 - PART B: LAB (CHECKPOINT PROJECT)
+Frontend + backend talking by DNS, exposed through Ingress
+Time: 90 minutes
+==================================================================
+
+GOAL
+----
+Namespace "shop" with:
+  - backend: your Flask app (YOURUSER/myapp:v1), 2 replicas, Service
+    "api" on port 80
+  - frontend: nginx that serves a page AND proxies /api to the backend
+    by Service DNS name
+  - Ingress: host shop.local -> frontend
+Then troubleshoot 3 injected faults.
+
+Use the kind-lab cluster with the ingress controller from Day 19.
+
+
+STEP 1: Backend
+---------------
+mkdir -p ~/k8s-journey/manifests/week3/shop && cd $_
+
+Write backend.yaml yourself:
+  Deployment "api": 2 replicas, image YOURUSER/myapp:v1,
+  containerPort 5000, label app=api
+  Service "api": port 80 -> targetPort 5000
+
+
+STEP 2: Frontend config (nginx reverse proxy)
+---------------------------------------------
+vi frontend-config.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-nginx
+data:
+  default.conf: |
+    server {
+      listen 80;
+      location / {
+        default_type text/html;
+        return 200 '<h1>Shop frontend</h1><p>Try /api</p>\n';
+      }
+      location /api {
+        proxy_pass http://api.shop.svc.cluster.local/;
+      }
+    }
+
+(ConfigMaps are Week 4; here it just delivers a config file.)
+
+
+STEP 3: Frontend Deployment and Service
+---------------------------------------
+vi frontend.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: frontend}
+  template:
+    metadata:
+      labels: {app: frontend}
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.27
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: conf
+          mountPath: /etc/nginx/conf.d
+      volumes:
+      - name: conf
+        configMap:
+          name: frontend-nginx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+spec:
+  selector: {app: frontend}
+  ports:
+  - port: 80
+    targetPort: 80
+
+
+STEP 4: Ingress
+---------------
+Write ingress.yaml yourself: host shop.local, path / Prefix ->
+Service frontend port 80, ingressClassName nginx.
+
+
+STEP 5: Deploy everything
+-------------------------
+k create ns shop
+k apply -n shop -f .
+k get all,ingress -n shop
+
+curl -H "Host: shop.local" localhost/
+curl -H "Host: shop.local" localhost/api
+curl -H "Host: shop.local" localhost/api       # repeat: different backend pods
+
+Expected: the /api calls show "Hello from v1! Served by container:
+api-xxxx" with changing pod names.
+
+
+STEP 6: Fault injection (ask someone, or do it yourself and forget)
+-------------------------------------------------------------------
+Apply each fault, observe the symptom, find the cause using ONLY
+get/describe/logs/endpointslices/nslookup, then fix.
+
+Fault 1:
+  k patch svc api -n shop -p '{"spec":{"ports":[{"port":80,"targetPort":5001}]}}'
+Fault 2:
+  k patch svc api -n shop -p '{"spec":{"selector":{"app":"apii"}}}'
+Fault 3:
+  k patch ingress <your-ingress-name> -n shop --type=json \
+    -p '[{"op":"replace","path":"/spec/rules/0/host","value":"shopp.local"}]'
+
+For each, write: symptom (status code / error), the command that
+revealed the cause, the fix. Restore with: k apply -n shop -f .
+
+
+STEP 7: Success criteria
+------------------------
+[ ] / returns the frontend page through the Ingress
+[ ] /api returns backend responses from different pods
+[ ] Frontend reaches backend only by DNS name (no IPs anywhere)
+[ ] All 3 faults diagnosed and fixed
+[ ] k delete ns shop && k create ns shop && k apply -n shop -f .
+    brings everything back
+
+
+STEP 8: Commit
+--------------
+cd ~/k8s-journey && git add . && git commit -m "week3 complete"

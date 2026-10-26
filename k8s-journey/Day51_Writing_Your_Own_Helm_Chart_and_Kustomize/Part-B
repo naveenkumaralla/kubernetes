@@ -1,0 +1,227 @@
+==================================================================
+DAY 51 - PART B: LAB
+Package your app as a Helm chart and as Kustomize overlays
+Time: 120 minutes
+==================================================================
+
+PART 1: HELM CHART
+==================
+
+STEP 1: Scaffold
+----------------
+mkdir -p ~/k8s-journey/week8/charts && cd $_
+helm create myapp
+tree myapp
+Read templates/deployment.yaml and _helpers.tpl. Note how names and
+labels come from helpers.
+
+
+STEP 2: Adapt values.yaml to your app
+-------------------------------------
+Edit myapp/values.yaml:
+  image:
+    repository: YOURUSER/myapp
+    tag: "v4"
+  service:
+    port: 80
+  containerPort: 5000
+  greeting: "Hello from my chart"
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 128Mi}
+  ingress:
+    enabled: true
+    className: nginx
+    hosts:
+    - host: myapp.local
+      paths:
+      - path: /
+        pathType: Prefix
+  autoscaling:
+    enabled: false
+
+Edit Chart.yaml: appVersion: "v4", description.
+
+
+STEP 3: Templates
+-----------------
+In templates/deployment.yaml:
+  - set containerPort to {{ .Values.containerPort }}
+  - change liveness path to /healthz and readiness path to /ready
+  - add env from a ConfigMap:
+          envFrom:
+          - configMapRef:
+              name: {{ include "myapp.fullname" . }}
+  - add under spec.template.metadata.annotations:
+          checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+In templates/service.yaml set targetPort: {{ .Values.containerPort }}.
+
+Create templates/configmap.yaml:
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "myapp.fullname" . }}
+  labels:
+    {{- include "myapp.labels" . | nindent 4 }}
+data:
+  GREETING: {{ .Values.greeting | quote }}
+
+
+STEP 4: Lint, render, install
+-----------------------------
+helm lint myapp
+helm template t myapp | less
+helm install myapp ./myapp -n app-dev --create-namespace
+k get all,ingress,cm -n app-dev
+curl -s -H "Host: myapp.local" localhost
+
+
+STEP 5: Environments
+--------------------
+cat > values-prod.yaml <<EOF
+replicaCount: 3
+greeting: "Hello from PROD"
+ingress:
+  hosts:
+  - host: myapp-prod.local
+    paths:
+    - path: /
+      pathType: Prefix
+EOF
+helm upgrade --install myapp-prod ./myapp -n app-prod --create-namespace -f values-prod.yaml
+curl -s -H "Host: myapp-prod.local" localhost
+
+Change the greeting and upgrade: pods roll automatically thanks to
+the checksum annotation.
+  helm upgrade myapp-prod ./myapp -n app-prod -f values-prod.yaml --set greeting="changed"
+  k get pods -n app-prod -w
+
+
+STEP 6: Package
+---------------
+helm package myapp          # myapp-0.1.0.tgz
+(Optional: push to an OCI registry:
+ helm push myapp-0.1.0.tgz oci://registry-1.docker.io/YOURUSER)
+
+helm uninstall myapp -n app-dev ; helm uninstall myapp-prod -n app-prod
+k delete ns app-dev app-prod
+
+
+PART 2: KUSTOMIZE
+=================
+
+STEP 7: Base
+------------
+mkdir -p ~/k8s-journey/week8/kustomize/{base,overlays/dev,overlays/prod} && cd ~/k8s-journey/week8/kustomize
+
+base/deployment.yaml: Deployment "myapp" (1 replica, image myapp,
+  port 5000, requests, probes /healthz and /ready, envFrom configMap
+  "app-config")
+base/service.yaml: Service "myapp" 80 -> 5000
+base/kustomization.yaml:
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- deployment.yaml
+- service.yaml
+labels:
+- pairs:
+    app.kubernetes.io/name: myapp
+  includeSelectors: true
+configMapGenerator:
+- name: app-config
+  literals:
+  - GREETING=Hello from base
+
+
+STEP 8: Dev overlay
+-------------------
+overlays/dev/kustomization.yaml:
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kz-dev
+resources:
+- ../../base
+- namespace.yaml
+images:
+- name: myapp
+  newName: docker.io/YOURUSER/myapp
+  newTag: v4
+configMapGenerator:
+- name: app-config
+  behavior: merge
+  literals:
+  - GREETING=Hello from DEV
+
+overlays/dev/namespace.yaml: a Namespace kz-dev.
+
+k kustomize overlays/dev        # read the output: namespace, image,
+                                # configmap name with hash suffix
+k apply -k overlays/dev
+k get all,cm -n kz-dev
+
+
+STEP 9: Prod overlay with patches
+---------------------------------
+overlays/prod/kustomization.yaml:
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kz-prod
+resources:
+- ../../base
+- namespace.yaml
+images:
+- name: myapp
+  newName: docker.io/YOURUSER/myapp
+  newTag: v4
+replicas:
+- name: myapp
+  count: 3
+configMapGenerator:
+- name: app-config
+  behavior: merge
+  literals:
+  - GREETING=Hello from PROD
+patches:
+- path: patch-resources.yaml
+
+overlays/prod/patch-resources.yaml:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+spec:
+  template:
+    spec:
+      containers:
+      - name: myapp
+        resources:
+          requests: {cpu: 200m, memory: 128Mi}
+          limits: {memory: 256Mi}
+
+(The container name in the patch must match base/deployment.yaml.)
+
+k diff -k overlays/prod ; k apply -k overlays/prod
+k get pods -n kz-prod
+
+
+STEP 10: Change config -> automatic rollout
+-------------------------------------------
+Change GREETING in overlays/prod, re-apply. The ConfigMap gets a new
+hashed name, the Deployment reference changes, pods roll.
+  k get cm -n kz-prod ; k get pods -n kz-prod -w
+
+Change the image tag the CI way:
+  cd overlays/prod && kustomize edit set image myapp=docker.io/YOURUSER/myapp:v3 && cd -
+  (needs the kustomize CLI; or edit newTag by hand)
+
+
+STEP 11: Clean up and commit
+----------------------------
+k delete -k overlays/dev ; k delete -k overlays/prod
+cd ~/k8s-journey && git add . && git commit -m "day51: own chart and kustomize"

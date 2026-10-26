@@ -1,0 +1,31 @@
+==================================================================
+DAY 29 - PART C: CHECKPOINT
+==================================================================
+
+1. Which component uses requests, and which enforces limits?
+Ans:
+
+
+2. Why were pods Pending in Step 3 while the CPUs were idle?
+Ans:
+
+
+3. What happens when a container exceeds its CPU limit? Memory limit?
+Ans:
+
+
+4. Write the resources block for a Guaranteed pod with 0.5 CPU and
+   256Mi.
+Ans:
+
+
+5. In which order are pods evicted under node memory pressure?
+Ans:
+
+
+6. LimitRange vs ResourceQuota?
+Ans:
+
+
+7. What is the difference between 128Mi, 128M, and 128m?
+Ans:

@@ -1,0 +1,27 @@
+==================================================================
+DAY 46 - PART C: CHECKPOINT
+==================================================================
+
+1. Block vs file vs object storage: one cloud example and one use case
+   each.
+Ans:
+
+
+2. What do the ebs-csi-controller and ebs-csi-node components do?
+Ans:
+
+
+3. Why is WaitForFirstConsumer important for EBS?
+Ans:
+
+
+4. What is a "volume node affinity conflict" and how do you avoid it?
+Ans:
+
+
+5. What happened to the EBS volume when you deleted the PVC?
+Ans:
+
+
+6. When would you choose RDS over a Postgres StatefulSet?
+Ans:

@@ -1,0 +1,23 @@
+==================================================================
+DAY 62 - PART C: CHECKPOINT
+==================================================================
+
+1. What makes an operator different from a Helm chart?
+Ans:
+
+
+2. What do the pg-rw, pg-ro and pg-r Services point to?
+Ans:
+
+
+3. Describe what happened when you deleted the primary pod. How long
+   did failover take?
+Ans:
+
+
+4. Compare this with your Day 26 hand-written Postgres StatefulSet.
+Ans:
+
+
+5. When would you still choose a managed cloud database?
+Ans:

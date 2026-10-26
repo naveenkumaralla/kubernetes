@@ -1,0 +1,28 @@
+==================================================================
+DAY 20 - PART C: CHECKPOINT
+==================================================================
+
+1. Where does the CNI config live on a node, and where are the
+   binaries?
+Ans:
+
+
+2. What happened to the nodes and CoreDNS before Calico was installed?
+   Why?
+Ans:
+
+
+3. Overlay vs routed networking: one pro and one con of each.
+Ans:
+
+
+4. What is eBPF and which CNI is built on it?
+Ans:
+
+
+5. Which CNI does EKS use by default, and what is special about it?
+Ans:
+
+
+6. Why does it matter which CNI you use for NetworkPolicies?
+Ans:

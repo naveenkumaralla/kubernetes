@@ -1,0 +1,220 @@
+==================================================================
+DAY 28 - PART B: LAB (CHECKPOINT PROJECT)
+WordPress + MySQL with persistent data
+Time: 90-120 minutes
+==================================================================
+
+mkdir -p ~/k8s-journey/manifests/week4/wordpress && cd $_
+k create ns wp
+kubens wp
+
+
+STEP 1: Secret (create imperatively, don't commit)
+--------------------------------------------------
+k create secret generic mysql-pass \
+  --from-literal=MYSQL_ROOT_PASSWORD='RootPass123' \
+  --from-literal=MYSQL_PASSWORD='WpPass123'
+
+
+STEP 2: ConfigMap
+-----------------
+vi config.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wp-config
+data:
+  MYSQL_DATABASE: wordpress
+  MYSQL_USER: wpuser
+  WORDPRESS_DB_HOST: mysql-0.mysql
+  WORDPRESS_DB_NAME: wordpress
+  WORDPRESS_DB_USER: wpuser
+
+
+STEP 3: MySQL StatefulSet + headless Service
+--------------------------------------------
+vi mysql.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+spec:
+  clusterIP: None
+  selector: {app: mysql}
+  ports:
+  - port: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels: {app: mysql}
+  template:
+    metadata:
+      labels: {app: mysql}
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.4
+        envFrom:
+        - configMapRef:
+            name: wp-config
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef: {name: mysql-pass, key: MYSQL_ROOT_PASSWORD}
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef: {name: mysql-pass, key: MYSQL_PASSWORD}
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 2Gi
+
+(The WORDPRESS_* keys in the ConfigMap also become env vars in MySQL;
+harmless. Optional improvement: split into two ConfigMaps.)
+
+
+STEP 4: WordPress Deployment + PVC + Service
+--------------------------------------------
+vi wordpress.yaml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wp-content
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # RWO volume can't be shared by old+new pod
+  selector:
+    matchLabels: {app: wordpress}
+  template:
+    metadata:
+      labels: {app: wordpress}
+    spec:
+      containers:
+      - name: wordpress
+        image: wordpress:6-apache
+        envFrom:
+        - configMapRef:
+            name: wp-config
+        env:
+        - name: WORDPRESS_DB_PASSWORD
+          valueFrom:
+            secretKeyRef: {name: mysql-pass, key: MYSQL_PASSWORD}
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: content
+          mountPath: /var/www/html
+      volumes:
+      - name: content
+        persistentVolumeClaim:
+          claimName: wp-content
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress
+spec:
+  selector: {app: wordpress}
+  ports:
+  - port: 80
+
+Why Recreate? With RollingUpdate the new pod would wait for the RWO
+volume still attached to the old pod (and on another node it would
+never attach).
+
+
+STEP 5: Ingress
+---------------
+Write ingress.yaml yourself: host wp.local -> Service wordpress:80,
+class nginx.
+
+
+STEP 6: Deploy and install WordPress
+------------------------------------
+k apply -f .
+k get pods -w           # mysql-0 Running, then wordpress Running
+k logs sts/mysql | tail -3
+k logs deploy/wordpress | tail -3
+
+Add "127.0.0.1 wp.local" to /etc/hosts on the machine running kind
+(or use port-forward: k port-forward svc/wordpress 8080:80).
+Open http://wp.local in a browser (or via SSH tunnel), complete the
+installer, write a blog post, and upload an image.
+
+From the CLI:
+  curl -s -H "Host: wp.local" localhost | grep -o "<title>.*</title>"
+
+
+STEP 7: Prove persistence
+-------------------------
+k delete pod mysql-0
+k delete pod -l app=wordpress
+k get pods -w
+Reload the site: the post and the image are still there.
+
+Check the database directly:
+  k exec -it mysql-0 -- mysql -uwpuser -pWpPass123 wordpress -e "select post_title from wp_posts where post_status='publish';"
+
+
+STEP 8: Backup CronJob
+----------------------
+Write backup.yaml yourself using Day 27 Step 10 as a model:
+  - PVC "mysql-backups" 1Gi
+  - CronJob "mysql-backup", schedule "0 2 * * *", concurrencyPolicy
+    Forbid, image mysql:8.4, command:
+      mysqldump -h mysql-0.mysql -uroot -p"$MYSQL_ROOT_PASSWORD" wordpress > /backups/wp-$(date +%F-%H%M).sql
+Test it now:
+  k create job backup-now --from=cronjob/mysql-backup
+  k logs job/backup-now
+  (check the file size is not 0)
+
+
+STEP 9: Disaster drill
+----------------------
+1) Note the post titles.
+2) k delete ns wp            (everything gone, including PVCs!)
+3) Recreate: k create ns wp; recreate the Secret; k apply -f .
+4) The site is empty. That is why backups must live OUTSIDE the
+   namespace/cluster (Week 7: cloud object storage).
+Write in Part C what you would change for production.
+
+
+STEP 10: Success criteria and commit
+------------------------------------
+[ ] WordPress reachable via Ingress
+[ ] Post + image survive deleting both pods
+[ ] Passwords only in a Secret, not in Git
+[ ] Backup Job produces a non-empty .sql file
+[ ] You can explain why WordPress uses Recreate here
+
+kubens default
+cd ~/k8s-journey && git add . && git commit -m "week4 complete"

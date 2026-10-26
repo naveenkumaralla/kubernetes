@@ -1,0 +1,31 @@
+==================================================================
+DAY 25 - PART C: CHECKPOINT
+==================================================================
+
+1. Explain PV, PVC and StorageClass in one sentence each.
+Ans:
+
+
+2. Why did the PVC stay Pending until a pod used it?
+Ans:
+
+
+3. What happened to the data when you deleted the PVC with reclaim
+   policy Delete? With Retain?
+Ans:
+
+
+4. RWO vs RWX: which kind of storage supports each?
+Ans:
+
+
+5. What is CSI, and name two CSI drivers.
+Ans:
+
+
+6. Why are local-path volumes tied to one node?
+Ans:
+
+
+7. A PVC is stuck Pending. List three possible causes.
+Ans:

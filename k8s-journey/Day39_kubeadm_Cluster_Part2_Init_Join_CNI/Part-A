@@ -1,0 +1,67 @@
+==================================================================
+DAY 39 - PART A: THEORY
+kubeadm Part 2: init, join, Certificates, kubeconfig
+Time: 30-40 minutes
+==================================================================
+
+1. WHAT "kubeadm init" DOES (PHASES)
+------------------------------------
+  preflight           checks (what you ran yesterday)
+  certs               creates the CA and all certs in /etc/kubernetes/pki
+  kubeconfig          admin.conf, kubelet.conf, controller-manager.conf,
+                      scheduler.conf, super-admin.conf
+  kubelet-start       writes kubelet config, starts kubelet
+  control-plane       writes static pod manifests (apiserver,
+                      controller-manager, scheduler)
+  etcd                writes etcd static pod manifest
+  wait-control-plane  waits until the API answers
+  upload-config       stores kubeadm/kubelet config in ConfigMaps
+  upload-certs        (HA) shares certs with other control planes
+  mark-control-plane  label + taint the node
+  bootstrap-token     creates a join token
+  addon               installs CoreDNS and kube-proxy
+NOT installed: a CNI. You must add one, or nodes stay NotReady.
+
+
+2. IMPORTANT init FLAGS
+-----------------------
+  --pod-network-cidr=192.168.0.0/16     must match your CNI config
+  --apiserver-advertise-address=<IP>    which IP the API listens on
+  --control-plane-endpoint=<LB:6443>    needed for future HA
+  --kubernetes-version                  pin the version
+Or use a config file: kubeadm init --config kubeadm.yaml
+
+
+3. JOINING WORKERS
+------------------
+  kubeadm join cp1:6443 --token <t> \
+    --discovery-token-ca-cert-hash sha256:<hash>
+The token (valid 24 h) lets the node authenticate once (TLS
+bootstrap); the hash lets the node verify it's talking to the RIGHT
+cluster. The kubelet then gets its own client certificate via a CSR
+that is auto-approved.
+
+New token later:
+  kubeadm token create --print-join-command
+
+
+4. KUBECONFIG FOR YOUR USER
+---------------------------
+  mkdir -p $HOME/.kube
+  sudo cp /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+admin.conf = full admin. Protect it like a root password.
+
+
+5. RESETTING
+------------
+  sudo kubeadm reset -f
+  sudo rm -rf /etc/cni/net.d $HOME/.kube
+  (and flush iptables rules) then init/join again.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- init: certs -> kubeconfigs -> static pods -> addons; no CNI.
+- join uses token + CA hash.
+- Nodes stay NotReady until a CNI is installed.

@@ -1,0 +1,122 @@
+==================================================================
+DAY 56 - PART B: LAB (CAPSTONE)
+Build and demo the 3-tier app
+Time: 4-8 hours (spread over several sessions if needed)
+==================================================================
+
+STEP 1: The application
+-----------------------
+mkdir -p ~/k8s-journey/capstone/{api,frontend,deploy}
+
+API (Flask + Postgres), capstone/api/app.py:
+
+from flask import Flask, jsonify, request
+import os, psycopg2
+
+app = Flask(__name__)
+
+def db():
+    return psycopg2.connect(
+        host=os.environ["DB_HOST"], dbname=os.environ.get("DB_NAME", "notes"),
+        user=os.environ.get("DB_USER", "postgres"), password=os.environ["DB_PASSWORD"])
+
+@app.route("/healthz")
+def healthz():
+    return "ok"
+
+@app.route("/ready")
+def ready():
+    try:
+        db().close(); return "ready"
+    except Exception as e:
+        return f"db not ready: {e}", 503
+
+@app.route("/api/notes", methods=["GET", "POST"])
+def notes():
+    conn = db(); cur = conn.cursor()
+    cur.execute("create table if not exists notes(id serial primary key, txt text)")
+    if request.method == "POST":
+        cur.execute("insert into notes(txt) values (%s)", (request.json["txt"],))
+    conn.commit()
+    cur.execute("select id, txt from notes order by id")
+    rows = [{"id": r[0], "txt": r[1]} for r in cur.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+app.run(host="0.0.0.0", port=8080)
+
+capstone/api/requirements.txt:
+  flask==3.0.3
+  psycopg2-binary==2.9.9
+capstone/api/Containerfile: python:3.12-slim, non-root user (USER 10001),
+  EXPOSE 8080.
+
+(Note: readiness checks the DB; liveness does NOT. Day 31.)
+
+Frontend: nginx serving a small index.html that fetches /api/notes
+and a form that POSTs to /api/notes. Use nginxinc/nginx-unprivileged
+as the base image (port 8080, non-root). The Ingress routes /api to
+the API Service and / to the frontend.
+
+Database: Postgres StatefulSet (Day 26) with a Secret and a PVC.
+
+
+STEP 2: CI
+----------
+Extend .github/workflows to build api and frontend images (two jobs,
+or a matrix) tagged with the git SHA, and update the dev overlay.
+
+
+STEP 3: Deployment config
+-------------------------
+capstone/deploy/ as Kustomize (base + overlays/dev + overlays/prod) or
+a Helm chart with values-dev/values-prod. Include:
+  Namespace, Deployments (frontend, api), StatefulSet (db), Services,
+  Ingress with cert-manager annotation (issuer lab-ca), ConfigMap,
+  HPA (api), PDBs, NetworkPolicies, ServiceMonitor (if your API
+  exposes /metrics; add prometheus-flask-exporter, or monitor the
+  ingress controller), PrometheusRule.
+The DB password Secret: create it by hand (k create secret ...) or
+with Sealed Secrets; never plain in Git.
+
+
+STEP 4: Argo CD
+---------------
+Application capstone-dev -> capstone/deploy/overlays/dev.
+Push. Watch it sync. Everything Healthy.
+
+
+STEP 5: Demo script (run it and record results in Part C)
+---------------------------------------------------------
+1. curl --cacert lab-ca.crt https://notes.local/            (frontend)
+2. curl -X POST -H 'Content-Type: application/json' -d '{"txt":"hello"}' \
+     --cacert lab-ca.crt https://notes.local/api/notes
+3. Delete db-0 and both api pods -> data still there
+4. Load test the API:
+     k run hey --rm -it --image=williamyeh/hey -- -z 2m -c 50 http://api.<ns>:8080/api/notes
+   (or a busybox wget loop) and show the HPA scaling
+5. Show NetworkPolicy: a pod in another namespace cannot reach db
+6. Change something in Git (replicas, message), push, show Argo CD
+   syncing it
+7. Roll back with git revert
+8. Show the Grafana dashboard and fire the alert (e.g. scale db to 0
+   -> API readiness fails -> errors)
+
+
+STEP 6 (OPTIONAL): Run it on EKS
+--------------------------------
+Create the Week 7 cluster, install the AWS LB Controller (or ingress-
+nginx with a LoadBalancer Service), cert-manager, Argo CD, then point
+an Application at overlays/prod (gp3 StorageClass, ECR or Docker Hub
+images). Demo for an hour. Run down.sh. Check the bill.
+
+
+STEP 7: README and final commit
+-------------------------------
+capstone/README.md: architecture diagram (ASCII is fine), components,
+how to deploy from zero, how to roll back, what you'd do differently
+in production.
+cd ~/k8s-journey && git add . && git commit -m "capstone complete" && git push
+
+Congratulations: you've completed the 8-week plan. Week 9 is optional
+and goes deeper into extending Kubernetes.

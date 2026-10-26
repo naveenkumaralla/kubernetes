@@ -1,0 +1,84 @@
+==================================================================
+DAY 48 - PART A: THEORY
+Autoscaling: Pods (HPA) and Nodes (Cluster Autoscaler / Karpenter)
+Time: 40 minutes
+==================================================================
+
+1. THREE LAYERS OF AUTOSCALING
+------------------------------
+  HPA  Horizontal Pod Autoscaler   more/fewer pod replicas
+  VPA  Vertical Pod Autoscaler     bigger/smaller requests per pod
+  Node autoscaling                 more/fewer nodes
+       Cluster Autoscaler (CA), Karpenter, EKS Auto Mode,
+       GKE/AKS built-in autoscaler
+
+They work together:
+  load up -> HPA adds pods -> pods Pending (no room) ->
+  node autoscaler adds nodes -> pods scheduled
+  load down -> HPA removes pods -> nodes under-used ->
+  node autoscaler drains and removes nodes
+
+
+2. HPA
+------
+  apiVersion: autoscaling/v2
+  kind: HorizontalPodAutoscaler
+  metadata:
+    name: web
+  spec:
+    scaleTargetRef:
+      apiVersion: apps/v1
+      kind: Deployment
+      name: web
+    minReplicas: 2
+    maxReplicas: 10
+    metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50     # % of the pods' CPU REQUEST
+
+desired = ceil(current replicas x current usage / target)
+Needs metrics-server and CPU REQUESTS on the pods (no request = no %).
+Scale-down waits 5 minutes by default (stabilization window) to avoid
+flapping. Custom/external metrics (queue length, RPS) via Prometheus
+Adapter or KEDA (Week 9).
+
+
+3. CLUSTER AUTOSCALER
+---------------------
+Watches for Pending pods that would fit on a new node of some node
+group -> increases that group's desired size (ASG). Removes nodes that
+are under-used and whose pods can move elsewhere (respecting PDBs).
+Works with node groups of fixed instance types.
+
+KARPENTER
+  Looks at Pending pods and launches EC2 instances of the best size
+  and type directly (no node groups), consolidates aggressively, great
+  with Spot. Popular on EKS. EKS Auto Mode is built on it.
+
+
+4. SPOT / PREEMPTIBLE NODES
+---------------------------
+60-90% cheaper, can be taken back with 2 minutes' notice. Fine for
+stateless, replicated, interruption-tolerant workloads; use PDBs,
+multiple instance types, and keep critical pods on on-demand nodes
+(taints/affinity, Week 5).
+
+
+5. GOTCHAS
+----------
+- No requests -> HPA can't compute; CA can't decide node fit.
+- Requests too high -> waste; too low -> noisy neighbours.
+- maxReplicas x request must fit within max nodes.
+- Scale-up of nodes takes minutes; keep some headroom for spikes.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- HPA scales pods on % of request; CA/Karpenter scale nodes on
+  Pending pods.
+- Requests are the input to all autoscalers.
+- Spot saves money for tolerant workloads.

@@ -1,0 +1,93 @@
+==================================================================
+DAY 13 - PART A: THEORY
+Namespaces and the Imperative vs Declarative Workflow
+Time: 30-40 minutes
+==================================================================
+
+1. WHAT IS A NAMESPACE?
+-----------------------
+A namespace is a virtual folder inside one cluster. It gives:
+  - name scoping: "web" in dev and "web" in prod can both exist
+  - a boundary for access control (RBAC, Week 5)
+  - a boundary for resource quotas (Week 5)
+  - a boundary for network policies (Week 5)
+
+It is NOT a hard security or network boundary by itself: pods in
+different namespaces can still talk to each other by default.
+
+
+2. BUILT-IN NAMESPACES
+----------------------
+  default           where things go if you don't say otherwise
+  kube-system       control plane and system add-ons
+  kube-public       readable by everyone (rarely used)
+  kube-node-lease   node heartbeat objects (Lease) for fast failure
+                    detection
+
+
+3. NAMESPACED vs CLUSTER-SCOPED
+-------------------------------
+Namespaced:      Pods, Deployments, Services, ConfigMaps, Secrets ...
+Cluster-scoped:  Nodes, Namespaces, PersistentVolumes,
+                 StorageClasses, ClusterRoles ...
+
+  k api-resources --namespaced=true
+  k api-resources --namespaced=false
+
+
+4. WORKING WITH NAMESPACES
+--------------------------
+  k get pods -n dev               one namespace
+  k get pods -A                   all namespaces
+  k create namespace dev
+  metadata.namespace: dev         in YAML
+  k config set-context --current --namespace=dev   change default
+  kubens dev                      same thing, shorter
+
+Deleting a namespace deletes EVERYTHING inside it. Be careful.
+
+
+5. DNS ACROSS NAMESPACES (PREVIEW OF WEEK 3)
+--------------------------------------------
+A Service "web" in namespace "prod" is reachable as:
+  web                         (from inside prod)
+  web.prod                    (from any namespace)
+  web.prod.svc.cluster.local  (full name)
+
+
+6. THREE WAYS TO MANAGE OBJECTS
+-------------------------------
+Imperative commands      k run, k create deploy, k scale, k set image
+  + fast, good for learning, exams, emergencies
+  - no record, not repeatable
+
+Imperative with files    k create -f, k replace -f, k delete -f
+  + files exist
+  - you must know if the object already exists
+
+Declarative              k apply -f <file or folder>
+  + idempotent, works with Git, supports diff
+  + the standard for teams and GitOps
+  - must keep files in sync (never mix with "k edit" in production)
+
+Rule of thumb: generate with imperative commands (--dry-run=client
+-o yaml), store in Git, deploy with apply.
+
+
+7. ORGANISING MANIFESTS
+-----------------------
+A simple layout that scales:
+
+  app/
+    base/            deployment.yaml, service.yaml
+    dev/             namespace.yaml, overrides
+    prod/            namespace.yaml, overrides
+
+You will automate the "overrides" part with Kustomize/Helm in Week 8.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Namespaces scope names, RBAC, quotas, policies; not network.
+- -n NAME or -A; set a default with kubens.
+- Generate imperatively, store in Git, apply declaratively.

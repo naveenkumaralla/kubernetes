@@ -1,0 +1,22 @@
+==================================================================
+DAY 57 - PART C: CHECKPOINT
+==================================================================
+
+1. What does backoffLimitPerIndex change compared to backoffLimit?
+Ans:
+
+
+2. Give one example each of FailJob and Ignore in a podFailurePolicy.
+Ans:
+
+
+3. What is spec.suspend used for in real systems?
+Ans:
+
+
+4. In the queue Job, how did the Job know it was complete?
+Ans:
+
+
+5. Why must queue workers be idempotent?
+Ans:

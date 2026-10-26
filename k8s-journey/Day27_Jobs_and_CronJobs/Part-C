@@ -1,0 +1,34 @@
+==================================================================
+DAY 27 - PART C: CHECKPOINT
+==================================================================
+
+1. When do you use a Job instead of a Deployment? Give three examples.
+Ans:
+
+
+2. What do completions and parallelism control?
+Ans:
+
+
+3. restartPolicy Never vs OnFailure in a Job: what did you observe?
+Ans:
+
+
+4. What does ttlSecondsAfterFinished do?
+Ans:
+
+
+5. Write a cron schedule for "every weekday at 18:15".
+Ans:
+
+
+6. concurrencyPolicy Allow, Forbid, Replace: describe each.
+Ans:
+
+
+7. Why must a Job be idempotent?
+Ans:
+
+
+8. How do you run a CronJob immediately for testing?
+Ans:

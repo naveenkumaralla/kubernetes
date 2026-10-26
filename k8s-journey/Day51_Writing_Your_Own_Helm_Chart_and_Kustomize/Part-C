@@ -1,0 +1,27 @@
+==================================================================
+DAY 51 - PART C: CHECKPOINT
+==================================================================
+
+1. What does {{ toYaml .Values.resources | nindent 12 }} do?
+Ans:
+
+
+2. How does the checksum/config annotation trigger rollouts?
+Ans:
+
+
+3. How does Kustomize's configMapGenerator achieve the same thing?
+Ans:
+
+
+4. Base vs overlay: what goes in each?
+Ans:
+
+
+5. When would you choose Helm, and when Kustomize?
+Ans:
+
+
+6. How do you change an image tag in a Kustomize overlay without
+   editing YAML by hand?
+Ans:

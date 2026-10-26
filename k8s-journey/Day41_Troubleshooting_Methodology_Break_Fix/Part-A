@@ -1,0 +1,83 @@
+==================================================================
+DAY 41 - PART A: THEORY
+A Troubleshooting Method: Pod -> Node -> Control Plane -> Network
+Time: 40 minutes
+==================================================================
+
+1. THE METHOD
+-------------
+Work from the symptom inward, one layer at a time. Don't guess.
+
+  1. APPLICATION / POD
+     k get pods -o wide            status? restarts? node?
+     k describe pod X              events (bottom!), conditions
+     k logs X [-c c] [--previous]  app output, crash reason
+     k get events --sort-by=.lastTimestamp
+  2. WORKLOAD / CONFIG
+     k describe deploy/rs          replicas, conditions, quota errors
+     referenced ConfigMaps, Secrets, PVCs, ServiceAccounts exist?
+  3. SERVICE / NETWORK
+     endpointslices empty? ports right? DNS? NetworkPolicy?
+  4. NODE
+     k get nodes ; k describe node X   Conditions, Taints, Allocated
+     on the node: systemctl status kubelet ; journalctl -u kubelet
+     crictl ps -a ; crictl logs ; df -h ; free -m
+  5. CONTROL PLANE
+     k get pods -n kube-system
+     static pod manifests, crictl logs of apiserver/etcd, certs
+
+
+2. STATUS -> LIKELY CAUSE
+-------------------------
+  Pending              no node fits (resources, taints, affinity),
+                       PVC unbound, quota, scheduler down
+  ContainerCreating    image pulling, volume attach/mount, CNI error,
+  (long)               Secret/ConfigMap missing
+  ImagePullBackOff     wrong name/tag, private registry, no network
+  CrashLoopBackOff     app exits: read logs --previous; bad command,
+                       config, missing env, failing liveness, OOM
+  CreateContainerConfigError  missing ConfigMap/Secret key
+  Running but 0/1      readiness probe failing
+  OOMKilled            memory limit too low / leak
+  Evicted              node pressure
+  Terminating forever  finalizers, node unreachable
+  Node NotReady        kubelet down, runtime down, CNI missing, disk
+                       full, certificate expired, network
+
+
+3. THE KUBELET IS THE KEY ON NODES
+----------------------------------
+  systemctl status kubelet
+  journalctl -u kubelet -f
+  /var/lib/kubelet/config.yaml    kubelet settings
+  /etc/kubernetes/kubelet.conf    its kubeconfig
+  Common: wrong cgroup driver, swap on, containerd stopped, expired
+  client cert, wrong API server address.
+
+
+4. WHEN kubectl ITSELF FAILS
+----------------------------
+"connection refused" / "the server could not find the requested
+resource" / timeouts:
+  - on the control plane: sudo crictl ps -a | grep apiserver
+  - sudo crictl logs <apiserver-container-id>
+  - check /etc/kubernetes/manifests/kube-apiserver.yaml for typos
+  - etcd healthy? certificates valid? disk full?
+  - your kubeconfig pointing to the right server?
+
+
+5. DEBUG TOOLS
+--------------
+  k debug -it pod/X --image=nicolaka/netshoot --target=c
+       attach an ephemeral debug container to a running pod
+  k debug node/worker1 -it --image=busybox:1.36
+       a pod on the node with the host filesystem at /host
+  k run tmp --rm -it --image=nicolaka/netshoot -- bash
+  k get pod X -o yaml   (compare spec with what you think)
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Layers: pod -> workload -> network -> node -> control plane.
+- describe (events) + logs (--previous) solve most pod problems.
+- journalctl -u kubelet and crictl solve most node problems.

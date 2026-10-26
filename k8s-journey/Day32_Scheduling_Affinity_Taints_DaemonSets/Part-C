@@ -1,0 +1,36 @@
+==================================================================
+DAY 32 - PART C: CHECKPOINT
+==================================================================
+
+1. What are the three phases of scheduling?
+Ans:
+
+
+2. nodeSelector vs node affinity: what can affinity do that
+   nodeSelector can't?
+Ans:
+
+
+3. Why was the third ha-web pod Pending?
+Ans:
+
+
+4. Taint vs toleration vs affinity: which attracts, which repels,
+   which permits?
+Ans:
+
+
+5. NoSchedule vs NoExecute?
+Ans:
+
+
+6. Why don't your app pods run on the control-plane node?
+Ans:
+
+
+7. Give three real uses of DaemonSets.
+Ans:
+
+
+8. What does a PodDisruptionBudget protect against?
+Ans:

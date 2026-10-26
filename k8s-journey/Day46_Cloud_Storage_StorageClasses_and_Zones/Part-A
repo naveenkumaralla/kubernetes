@@ -1,0 +1,81 @@
+==================================================================
+DAY 46 - PART A: THEORY
+Cloud Storage: CSI Drivers, StorageClasses, and Zones
+Time: 40 minutes
+==================================================================
+
+1. BLOCK vs FILE vs OBJECT
+--------------------------
+  Block (RWO)  EBS (AWS), Azure Disk, GCE Persistent Disk
+               one node at a time, ONE AZ only, fast; databases
+  File (RWX)   EFS (AWS), Azure Files, Filestore (GCP)
+               many nodes, multi-AZ, NFS; shared content
+  Object       S3, Blob, GCS: NOT mounted as volumes normally; apps
+               use the API (via workload identity, Day 47). Best for
+               backups, uploads, static assets.
+
+
+2. THE EBS CSI DRIVER
+---------------------
+An add-on (we installed it with eksctl). Components:
+  ebs-csi-controller (Deployment)  calls AWS APIs: create, attach,
+                                   delete, snapshot volumes
+  ebs-csi-node (DaemonSet)         formats and mounts on each node
+It needs IAM permissions -> we gave it a role (wellKnownPolicies).
+
+
+3. STORAGECLASS FOR EBS gp3
+---------------------------
+  apiVersion: storage.k8s.io/v1
+  kind: StorageClass
+  metadata:
+    name: gp3
+    annotations:
+      storageclass.kubernetes.io/is-default-class: "true"
+  provisioner: ebs.csi.aws.com
+  parameters:
+    type: gp3
+    encrypted: "true"
+  reclaimPolicy: Delete
+  volumeBindingMode: WaitForFirstConsumer
+  allowVolumeExpansion: true
+
+Newer EKS clusters don't mark any StorageClass as default, so a PVC
+without storageClassName stays Pending until you create one like this.
+
+
+4. THE ZONE TRAP
+----------------
+An EBS volume lives in ONE AZ. A pod using it can only run on nodes in
+that AZ.
+  - WaitForFirstConsumer: the disk is created in the AZ where the pod
+    was scheduled (good).
+  - If later no node in that AZ has room (or the node group has no
+    nodes there), the pod stays Pending: "volume node affinity
+    conflict".
+Mitigations: node groups in every AZ; one node group per AZ for
+stateful workloads; RWX file storage (EFS) when pods must move freely;
+managed databases.
+
+
+5. SNAPSHOTS AND EXPANSION
+--------------------------
+  VolumeSnapshotClass + VolumeSnapshot -> EBS snapshot (backup)
+  PVC from a snapshot (dataSource) -> restore/clone
+  Increase spec.resources.requests.storage -> online resize
+
+
+6. STATEFUL IN THE CLOUD: THE HONEST ADVICE
+-------------------------------------------
+Running databases on Kubernetes is possible (StatefulSets, operators,
+Week 9). Most teams still use managed databases (RDS, Aurora, Cloud
+SQL, Azure Database) for backups, failover, patching. Kubernetes
+apps connect to them over the VPC with credentials from a secret store
+or IAM auth.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Block = RWO, single AZ; file = RWX, multi-AZ; object = API.
+- CSI driver + IAM + StorageClass = dynamic cloud disks.
+- WaitForFirstConsumer and AZ-aware node groups avoid zone traps.

@@ -1,0 +1,169 @@
+==================================================================
+DAY 45 - PART B: LAB
+Push to ECR and expose your app on the internet
+Time: 90-120 minutes
+==================================================================
+
+STEP 1: Create the cluster
+--------------------------
+cd ~/k8s-journey/cloud/eks && eksctl create cluster -f cluster.yaml
+(while it builds, do Steps 2-3)
+
+
+STEP 2: Create an ECR repo and push your image
+----------------------------------------------
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+REGION=ap-south-1
+REG=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+
+aws ecr create-repository --repository-name myapp --image-scanning-configuration scanOnPush=true
+aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $REG
+(Podman: replace "docker" with "podman")
+
+cd ~/k8s-journey/myapp
+docker build -t $REG/myapp:v4 .
+docker push $REG/myapp:v4
+aws ecr describe-images --repository-name myapp --output table
+
+
+STEP 3: Scan results
+--------------------
+aws ecr describe-image-scan-findings --repository-name myapp --image-id imageTag=v4 \
+  --query 'imageScanFindings.findingSeverityCounts'
+
+
+STEP 4: Deploy from ECR (no pull secret needed)
+-----------------------------------------------
+mkdir -p ~/k8s-journey/cloud/eks/app && cd $_
+k create deploy myapp --image=$REG/myapp:v4 --replicas=3 --port=5000
+k get pods -o wide
+k describe pod -l app=myapp | grep -E "Image:|Pulled"
+
+
+STEP 5: LoadBalancer Service (default cloud provider)
+-----------------------------------------------------
+vi svc-lb.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-lb
+spec:
+  type: LoadBalancer
+  selector:
+    app: myapp
+  ports:
+  - port: 80
+    targetPort: 5000
+
+k apply -f svc-lb.yaml
+k get svc myapp-lb -w        # EXTERNAL-IP becomes a DNS name (1-3 min)
+LB=$(k get svc myapp-lb -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+sleep 60 ; for i in 1 2 3 4; do curl -s http://$LB; done
+
+Console: EC2 -> Load Balancers: find it. Note its type, the subnets
+(public), listeners (80 -> NodePort), and registered targets (nodes).
+  k get svc myapp-lb -o jsonpath='{.spec.ports[0].nodePort}{"\n"}'
+
+
+STEP 6: Install the AWS Load Balancer Controller
+------------------------------------------------
+(Check the latest install guide in the AWS docs; steps below follow
+the standard Helm + IAM approach.)
+
+curl -sO https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
+aws iam create-policy --policy-name AWSLoadBalancerControllerIAMPolicy-lab --policy-document file://iam_policy.json
+
+eksctl create iamserviceaccount --cluster lab --namespace kube-system \
+  --name aws-load-balancer-controller \
+  --attach-policy-arn arn:aws:iam::$ACCOUNT:policy/AWSLoadBalancerControllerIAMPolicy-lab \
+  --approve
+
+helm repo add eks https://aws.github.io/eks-charts && helm repo update
+VPC=$(aws eks describe-cluster --name lab --query cluster.resourcesVpcConfig.vpcId --output text)
+helm install aws-load-balancer-controller eks/aws-load-balancer-controller -n kube-system \
+  --set clusterName=lab --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set region=$REGION --set vpcId=$VPC
+k get deploy -n kube-system aws-load-balancer-controller
+
+
+STEP 7: NLB with IP targets (straight to pods)
+----------------------------------------------
+vi svc-nlb.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-nlb
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+spec:
+  type: LoadBalancer
+  selector:
+    app: myapp
+  ports:
+  - port: 80
+    targetPort: 5000
+
+k apply -f svc-nlb.yaml
+k get svc myapp-nlb -w
+In the console, the NLB's target group lists POD IPs, not nodes.
+Scale the deployment and watch targets change.
+
+
+STEP 8: ALB Ingress
+-------------------
+vi ingress-alb.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /ready
+spec:
+  ingressClassName: alb
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: myapp-lb
+            port:
+              number: 80
+
+k apply -f ingress-alb.yaml
+k get ingress myapp -w          # ADDRESS appears after 2-4 minutes
+ALB=$(k get ingress myapp -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+sleep 60 ; curl -s http://$ALB ; curl -s http://$ALB/ready
+
+
+STEP 9: CLEAN UP (ORDER MATTERS)
+--------------------------------
+k delete ingress myapp
+k delete svc myapp-lb myapp-nlb
+sleep 90                                   # let controllers delete LBs
+aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerName'
+aws elb describe-load-balancers --query 'LoadBalancerDescriptions[].LoadBalancerName'
+helm uninstall aws-load-balancer-controller -n kube-system
+eksctl delete cluster -f ~/k8s-journey/cloud/eks/cluster.yaml --wait
+(Keep the ECR repo; storage is cheap. The IAM policy can stay too.)
+
+
+STEP 10: AKS / GKE equivalents
+------------------------------
+AKS: az acr create -g lab-rg -n <unique> --sku Basic ;
+     az aks update -g lab-rg -n lab --attach-acr <unique> ;
+     az acr login -n <unique> ; Service type LoadBalancer -> Azure LB
+GKE: gcloud artifacts repositories create myapp --repository-format=docker
+     --location=asia-south1 ; gcloud auth configure-docker asia-south1-docker.pkg.dev ;
+     Ingress (class gce) -> Google HTTP(S) LB
+
+cd ~/k8s-journey && git add . && git commit -m "day45: ecr and load balancers"

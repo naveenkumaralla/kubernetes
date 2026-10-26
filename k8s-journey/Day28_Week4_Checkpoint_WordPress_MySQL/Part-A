@@ -1,0 +1,41 @@
+==================================================================
+DAY 28 - PART A: THEORY (REVISION)
+Week 4 Review: Configuration and Storage
+Time: 30 minutes
+==================================================================
+
+Answer without looking:
+
+1. ConfigMap: 3 ways to consume; what updates live and what doesn't.
+2. Secret: why base64 isn't security; 3 ways to protect secrets.
+3. emptyDir vs hostPath vs PVC: lifetime of each.
+4. PV, PVC, StorageClass; static vs dynamic provisioning.
+5. Access modes and reclaim policies.
+6. StatefulSet guarantees; why a headless Service.
+7. Job fields: completions, parallelism, backoffLimit, TTL.
+8. CronJob schedule and concurrencyPolicy.
+
+
+DECISION TABLE
+--------------
+Need                                       Use
+-----------------------------------------  ---------------------------
+Non-secret settings                        ConfigMap
+Passwords, tokens, certs                   Secret (+ external store)
+Scratch space shared by containers         emptyDir
+Data that must survive pod restarts        PVC
+Each replica needs its own disk + name     StatefulSet + volumeClaim-
+                                           Templates
+Run once to completion                     Job
+Run on a schedule                          CronJob
+
+
+TODAY'S PROJECT
+---------------
+WordPress (Deployment) + MySQL (StatefulSet), with:
+  - passwords in a Secret
+  - settings in a ConfigMap
+  - MySQL data on a PVC
+  - uploads (wp-content) on a PVC
+  - a nightly backup CronJob
+Then delete pods and prove the site and data survive.

@@ -1,0 +1,165 @@
+==================================================================
+DAY 33 - PART B: LAB
+Create a read-only user and a limited ServiceAccount
+Time: 90-120 minutes
+==================================================================
+
+mkdir -p ~/k8s-journey/manifests/week5/rbac && cd $_
+k create ns dev
+k create deploy web -n dev --image=nginx:1.27 --replicas=2
+
+
+STEP 1: Who am I now?
+---------------------
+k auth whoami 2>/dev/null || k config view --minify -o jsonpath='{.users[0].name}{"\n"}'
+k auth can-i '*' '*'                # yes: you are cluster-admin
+k get clusterrolebinding cluster-admin -o yaml | grep -A4 subjects
+
+
+STEP 2: A ServiceAccount that can only view pods in dev
+-------------------------------------------------------
+vi sa-viewer.yaml
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: viewer
+  namespace: dev
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-reader
+  namespace: dev
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: viewer-pod-reader
+  namespace: dev
+subjects:
+- kind: ServiceAccount
+  name: viewer
+  namespace: dev
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+
+k apply -f sa-viewer.yaml
+
+SA=system:serviceaccount:dev:viewer
+k auth can-i list pods -n dev --as=$SA            # yes
+k auth can-i delete pods -n dev --as=$SA          # no
+k auth can-i list pods -n default --as=$SA        # no
+k auth can-i list deployments -n dev --as=$SA     # no
+k auth can-i --list -n dev --as=$SA
+
+
+STEP 3: Use the SA from inside a pod (raw API calls with its token)
+-------------------------------------------------------------------
+k run api-client -n dev --image=nicolaka/netshoot \
+  --overrides='{"spec":{"serviceAccountName":"viewer"}}' -- sleep infinity
+k exec -n dev api-client -- ls /var/run/secrets/kubernetes.io/serviceaccount/
+
+k exec -it -n dev api-client -- bash
+  SA=/var/run/secrets/kubernetes.io/serviceaccount
+  TOKEN=$(cat $SA/token)
+  API=https://kubernetes.default.svc
+  c() { curl -s -o /dev/null -w "%{http_code}  $1 $2\n" --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" -X $1 $API$2; }
+  c GET    /api/v1/namespaces/dev/pods                # 200 allowed
+  c GET    /apis/apps/v1/namespaces/dev/deployments   # 403 forbidden
+  c GET    /api/v1/namespaces/default/pods            # 403 other namespace
+  c DELETE /api/v1/namespaces/dev/pods/api-client     # 403 no delete
+  curl -s --cacert $SA/ca.crt -H "Authorization: Bearer $TOKEN" $API/api/v1/namespaces/dev/pods | grep '"name"' | head
+  exit
+
+This is exactly what kubectl (and any operator or CI tool running in a
+pod) does under the hood.
+
+Decode the token to see who it claims to be:
+  k exec -n dev api-client -- sh -c 'cut -d. -f2 /var/run/secrets/kubernetes.io/serviceaccount/token | base64 -d 2>/dev/null; echo'
+Look for "sub": "system:serviceaccount:dev:viewer" and "exp" (expiry).
+
+
+STEP 4: Create a real user "alice" with a client certificate
+------------------------------------------------------------
+openssl genrsa -out alice.key 2048
+openssl req -new -key alice.key -out alice.csr -subj "/CN=alice/O=dev-team"
+
+cat > alice-csr.yaml <<EOF
+apiVersion: certificates.k8s.io/v1
+kind: CertificateSigningRequest
+metadata:
+  name: alice
+spec:
+  request: $(base64 -w0 < alice.csr)
+  signerName: kubernetes.io/kube-apiserver-client
+  expirationSeconds: 86400
+  usages: ["client auth"]
+EOF
+
+k apply -f alice-csr.yaml
+k get csr alice                        # Pending
+k certificate approve alice
+k get csr alice -o jsonpath='{.status.certificate}' | base64 -d > alice.crt
+openssl x509 -in alice.crt -noout -subject -enddate
+
+CN = user name, O = group.
+
+
+STEP 5: Give alice a kubeconfig
+-------------------------------
+k config set-credentials alice --client-certificate=alice.crt --client-key=alice.key --embed-certs=true
+k config set-context alice@lab --cluster=kind-lab --user=alice --namespace=dev
+k --context=alice@lab get pods         # Forbidden: no permissions yet
+
+
+STEP 6: Bind the built-in "view" ClusterRole to alice in dev
+------------------------------------------------------------
+k create rolebinding alice-view -n dev --clusterrole=view --user=alice
+k --context=alice@lab get pods,deploy,svc     # works
+k --context=alice@lab get secrets             # Forbidden (view excludes secrets)
+k --context=alice@lab delete pod -l app=web   # Forbidden
+k --context=alice@lab get pods -n default     # Forbidden
+
+
+STEP 7: Group binding
+---------------------
+Give the whole group "dev-team" edit rights in dev:
+  k create rolebinding devteam-edit -n dev --clusterrole=edit --group=dev-team
+  k --context=alice@lab scale deploy web --replicas=3     # works now (alice is in dev-team)
+  k auth can-i --list -n dev --as=alice --as-group=dev-team | head -20
+
+
+STEP 8: ClusterRole + ClusterRoleBinding (cluster-wide read of nodes)
+---------------------------------------------------------------------
+k create clusterrole node-reader --verb=get,list,watch --resource=nodes
+k create clusterrolebinding alice-nodes --clusterrole=node-reader --user=alice
+k --context=alice@lab get nodes        # works
+
+
+STEP 9: Find who can do something
+---------------------------------
+k get rolebindings,clusterrolebindings -A -o wide | grep -E "alice|dev-team|viewer"
+
+
+STEP 10: Disable token mounting where not needed
+------------------------------------------------
+k patch sa default -n dev -p '{"automountServiceAccountToken": false}'
+k run notoken -n dev --image=busybox:1.36 -- sleep 3600
+k exec -n dev notoken -- ls /var/run/secrets/kubernetes.io/serviceaccount 2>&1
+
+
+STEP 11: Clean up and commit
+----------------------------
+k config use-context kind-lab
+k delete ns dev
+k delete clusterrolebinding alice-nodes ; k delete clusterrole node-reader ; k delete csr alice
+Keep alice.key out of Git:
+  echo "manifests/week5/rbac/*.key" >> ~/k8s-journey/.gitignore
+cd ~/k8s-journey && git add . && git commit -m "day33: rbac"

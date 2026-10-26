@@ -1,0 +1,82 @@
+==================================================================
+DAY 20 - PART A: THEORY
+CNI Plugins: How Pod Networking Is Implemented
+Time: 30-40 minutes
+==================================================================
+
+1. WHAT IS CNI?
+---------------
+CNI (Container Network Interface) is a small standard:
+  - the kubelet/container runtime calls a CNI binary with ADD when a
+    pod starts and DEL when it stops
+  - the binary sets up the pod's interface, IP, and routes, and
+    returns the result as JSON
+
+On each node:
+  /etc/cni/net.d/      config (which plugin, which IP range)
+  /opt/cni/bin/        plugin binaries (bridge, host-local, loopback,
+                       portmap, plus your CNI's own)
+
+Most CNIs also run a DaemonSet (an agent on every node) to program
+routes, tunnels, or eBPF, and to enforce NetworkPolicies.
+
+
+2. IPAM
+-------
+IP Address Management: which IP does the pod get?
+  host-local    each node hands out IPs from its PodCIDR
+  calico-ipam   blocks of IPs assigned dynamically
+  cloud IPAM    IPs from the VPC subnet (AWS VPC CNI)
+
+
+3. POPULAR CNIs
+---------------
+Plugin     Data path              NetworkPolicy   Notes
+---------  ---------------------  --------------  -------------------------
+kindnet    simple routes          (newer: basic)  kind's default, minimal
+Flannel    VXLAN overlay          no              simple, popular in labs
+Calico     BGP routes or VXLAN,   yes (+ own      very common in enterprise
+           iptables or eBPF       extended CRDs)  and on-prem
+Cilium     eBPF                   yes (L3-L7)     can replace kube-proxy,
+                                                  Hubble observability
+AWS VPC    native VPC IPs         with addon      EKS default (Week 7)
+Azure CNI  native VNet IPs        with Calico/    AKS
+                                  Cilium
+GKE        Dataplane V2 (Cilium)  yes             GKE
+
+
+4. OVERLAY vs ROUTED vs NATIVE
+------------------------------
+Overlay (VXLAN/Geneve)  pod packet wrapped inside a node-to-node UDP
+                        packet. Works on any network. Small overhead,
+                        smaller MTU.
+Routed (BGP)            nodes tell each other (or the routers) which
+                        pod ranges they own. No wrapping, faster;
+                        network must allow it.
+Native cloud            pods get real VPC IPs; cloud routes them.
+                        Uses more VPC IPs.
+
+
+5. eBPF
+-------
+eBPF lets programs run safely inside the Linux kernel. Cilium (and
+Calico eBPF mode) use it to route packets, load-balance Services, and
+enforce policies without long iptables chains. Faster at scale and
+gives deep visibility (which pod talked to which, HTTP paths, drops).
+
+
+6. CHOOSING
+-----------
+Learning:      kindnet/Flannel (simple)
+Policies:      Calico or Cilium
+Cloud:         usually the provider default (Week 7)
+Big scale +
+observability: Cilium
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- CNI = standard; plugin binaries in /opt/cni/bin, config in
+  /etc/cni/net.d.
+- Overlay vs routed vs native cloud networking.
+- NetworkPolicy enforcement depends on the CNI.

@@ -1,0 +1,30 @@
+==================================================================
+DAY 22 - PART C: CHECKPOINT
+==================================================================
+
+1. Why should configuration not be baked into images?
+Ans:
+
+
+2. --from-file vs --from-env-file: what is the difference?
+Ans:
+
+
+3. Name the three ways to consume a ConfigMap in a pod.
+Ans:
+
+
+4. You updated a ConfigMap. Which pods see the change, and when?
+Ans:
+
+
+5. What status does a pod show if its ConfigMap is missing?
+Ans:
+
+
+6. Why use an immutable ConfigMap?
+Ans:
+
+
+7. How do you make a Deployment pick up a changed env var?
+Ans:

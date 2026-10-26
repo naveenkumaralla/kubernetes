@@ -1,0 +1,67 @@
+==================================================================
+DAY 47 - PART A: THEORY
+Cloud IAM for Pods: EKS Pod Identity, IRSA, Workload Identity
+Time: 40 minutes
+==================================================================
+
+1. THE PROBLEM
+--------------
+Your app must read an S3 bucket. Bad options:
+  - put AWS access keys in a Secret: long-lived, leak-prone, hard to
+    rotate, shared by everything that can read the Secret
+  - give the NODE's IAM role S3 access: EVERY pod on every node gets it
+Good option: give ONE ServiceAccount an IAM role. Only pods using that
+ServiceAccount get short-lived credentials for that role.
+
+
+2. EKS POD IDENTITY (newer, simplest)
+-------------------------------------
+  - add-on eks-pod-identity-agent (DaemonSet on every node)
+  - "pod identity association": (cluster, namespace, serviceaccount)
+    -> IAM role (trust policy: pods.eks.amazonaws.com)
+  - the agent injects env vars; AWS SDKs fetch temporary credentials
+    automatically
+
+
+3. IRSA (IAM Roles for Service Accounts, older, still common)
+-------------------------------------------------------------
+  - cluster has an OIDC provider; ServiceAccount tokens are OIDC tokens
+  - IAM role trust policy trusts that OIDC provider + the exact
+    "system:serviceaccount:<ns>:<name>" subject
+  - ServiceAccount annotated:
+      eks.amazonaws.com/role-arn: arn:aws:iam::<acct>:role/<role>
+  - a webhook mounts a token; SDK calls sts:AssumeRoleWithWebIdentity
+(eksctl create iamserviceaccount, used yesterday for the LB
+controller, sets up IRSA.)
+
+
+4. AKS AND GKE
+--------------
+AKS Workload Identity: managed identity + federated credential; SA
+  annotation azure.workload.identity/client-id, pod label
+  azure.workload.identity/use: "true".
+GKE Workload Identity Federation: grant IAM roles directly to
+  principal://.../subject/ns/<ns>/sa/<sa>, or annotate the SA with
+  iam.gke.io/gcp-service-account.
+Same idea everywhere: SA -> federated -> cloud role, no keys.
+
+
+5. SECRETS FROM CLOUD SECRET MANAGERS
+-------------------------------------
+External Secrets Operator: a SecretStore authenticates with workload
+identity to AWS Secrets Manager / SSM, Azure Key Vault, GCP Secret
+Manager; ExternalSecret objects sync values into Kubernetes Secrets
+and refresh them. Secrets never live in Git.
+
+
+6. LEAST PRIVILEGE
+------------------
+One role per app; scope to specific resources (one bucket ARN, not
+"*"); separate roles per environment.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Never cloud keys in Secrets; never broad node roles.
+- ServiceAccount -> IAM role via Pod Identity or IRSA.
+- External Secrets syncs cloud secret stores into the cluster.

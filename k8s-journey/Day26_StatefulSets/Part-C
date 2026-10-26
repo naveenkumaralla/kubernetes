@@ -1,0 +1,28 @@
+==================================================================
+DAY 26 - PART C: CHECKPOINT
+==================================================================
+
+1. List four things a StatefulSet guarantees that a Deployment does
+   not.
+Ans:
+
+
+2. Why does a StatefulSet need a headless Service?
+Ans:
+
+
+3. What was the DNS name of web-1? Write it in full.
+Ans:
+
+
+4. After scaling down from 3 to 1, what happened to data-web-2? Why
+   is this a good default?
+Ans:
+
+
+5. How does "partition" help you do a canary update?
+Ans:
+
+
+6. Does a StatefulSet make Postgres highly available? What would?
+Ans:

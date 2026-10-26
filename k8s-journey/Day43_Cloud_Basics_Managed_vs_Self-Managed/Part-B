@@ -1,0 +1,125 @@
+==================================================================
+DAY 43 - PART B: LAB
+Account safety, CLI tools, first look around
+Time: 75-90 minutes
+==================================================================
+
+STEP 1: AWS account and MFA
+---------------------------
+1. Create an AWS account (or use your company's sandbox).
+2. Turn on MFA for the root user. Don't use root day to day.
+3. In IAM Identity Center (or IAM), create an admin user for
+   yourself, with MFA. Use that from now on.
+
+
+STEP 2: Budget alert (DO THIS NOW)
+----------------------------------
+AWS console -> Billing and Cost Management -> Budgets -> Create budget
+  -> "Zero spend budget" AND a monthly cost budget of e.g. USD 20 with
+  email alerts at 50% and 100%.
+Also enable "Free tier usage alerts" in Billing preferences.
+
+
+STEP 3: Install the AWS CLI v2
+------------------------------
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+unzip -q awscliv2.zip && sudo ./aws/install
+aws --version
+
+Configure credentials (SSO recommended):
+  aws configure sso          # if you use IAM Identity Center
+  # or for an IAM user with access keys:
+  aws configure              # region: ap-south-1, output: json
+aws sts get-caller-identity  # who am I?
+
+
+STEP 4: Install eksctl and helm
+-------------------------------
+ARCH=amd64
+curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_$ARCH.tar.gz"
+tar -xzf eksctl_Linux_$ARCH.tar.gz -C /tmp && sudo install /tmp/eksctl /usr/local/bin/
+eksctl version
+
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm version
+
+
+STEP 5: Look at your default VPC and AZs
+----------------------------------------
+aws ec2 describe-availability-zones --query 'AvailabilityZones[].ZoneName' --output table
+aws ec2 describe-vpcs --query 'Vpcs[].{ID:VpcId,CIDR:CidrBlock,Default:IsDefault}' --output table
+aws ec2 describe-subnets --query 'Subnets[].{AZ:AvailabilityZone,CIDR:CidrBlock,Public:MapPublicIpOnLaunch}' --output table
+
+(eksctl will create its own dedicated VPC with public + private
+subnets in 2-3 AZs and a NAT gateway; you'll see it tomorrow.)
+
+
+STEP 6: Check supported EKS versions and pricing
+------------------------------------------------
+Open the "Amazon EKS Kubernetes versions" page in the AWS docs:
+  - pick a version in STANDARD support (versions in EXTENDED support
+    cost about 6x more per hour for the control plane)
+Open the EKS pricing page and the EC2 pricing page for t3.medium in
+ap-south-1. Calculate the hourly cost of: 1 control plane + 2 x
+t3.medium + 1 NAT gateway + 1 load balancer. Write it in Part C.
+
+
+STEP 7: Write the cluster config (used tomorrow)
+------------------------------------------------
+mkdir -p ~/k8s-journey/cloud/eks && cd $_
+vi cluster.yaml
+
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: lab
+  region: ap-south-1
+  # version: "1.xx"     # optional; omit to use eksctl's default
+iam:
+  withOIDC: true
+addons:
+- name: vpc-cni
+- name: coredns
+- name: kube-proxy
+- name: eks-pod-identity-agent
+- name: aws-ebs-csi-driver
+  wellKnownPolicies:
+    ebsCSIController: true
+managedNodeGroups:
+- name: ng-1
+  instanceType: t3.medium
+  minSize: 1
+  desiredCapacity: 2
+  maxSize: 4
+  volumeSize: 20
+  privateNetworking: true
+  iam:
+    withAddonPolicies:
+      autoScaler: true
+      ebs: true
+
+Read every line and write in Part C what it does.
+
+eksctl create cluster -f cluster.yaml --dry-run | head -60
+
+(--dry-run prints the full config with defaults, creates nothing.)
+
+
+STEP 8: AKS / GKE equivalents (read)
+------------------------------------
+AKS:
+  az login
+  az group create -n lab-rg -l centralindia
+  az aks create -g lab-rg -n lab --node-count 2 --node-vm-size Standard_B2s \
+    --enable-oidc-issuer --enable-workload-identity --generate-ssh-keys
+  az aks get-credentials -g lab-rg -n lab
+  az group delete -n lab-rg --yes          # deletes EVERYTHING in the group
+GKE:
+  gcloud auth login ; gcloud config set project <PROJECT>
+  gcloud container clusters create lab --region asia-south1 --num-nodes 1 \
+    --machine-type e2-medium --workload-pool=<PROJECT>.svc.id.goog
+  gcloud container clusters get-credentials lab --region asia-south1
+  gcloud container clusters delete lab --region asia-south1
+
+Commit:
+  cd ~/k8s-journey && git add . && git commit -m "day43: cloud prep"

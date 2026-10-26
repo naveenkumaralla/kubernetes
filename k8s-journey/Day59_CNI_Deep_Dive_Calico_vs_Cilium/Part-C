@@ -1,0 +1,25 @@
+==================================================================
+DAY 59 - PART C: CHECKPOINT
+==================================================================
+
+1. Name three things Calico/Cilium policies can do that standard
+   NetworkPolicy can't.
+Ans:
+
+
+2. Why did the L7-denied request return 403 but the L3-denied one
+   time out?
+Ans:
+
+
+3. What is Hubble and what did it show you?
+Ans:
+
+
+4. Why did the FQDN policy need a DNS rule?
+Ans:
+
+
+5. Which CNI would you pick for (a) an on-prem cluster with BGP
+   routers, (b) a large cloud cluster needing L7 visibility? Why?
+Ans:

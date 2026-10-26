@@ -1,0 +1,57 @@
+==================================================================
+DAY 59 - PART A: THEORY
+CNI Deep Dive: Calico vs Cilium
+Time: 40 minutes
+==================================================================
+
+1. SIDE BY SIDE
+---------------
+                     Calico                       Cilium
+  Data plane         iptables/nftables, eBPF,     eBPF
+                     or Windows HNS
+  Routing            BGP (no overlay) or VXLAN/   VXLAN/Geneve overlay
+                     IP-in-IP                     or native routing
+  kube-proxy         keeps it, or replaces it     can fully replace it
+                     in eBPF mode                 (kubeProxyReplacement)
+  Policies           K8s NetworkPolicy + Calico   K8s NetworkPolicy +
+                     NetworkPolicy /              CiliumNetworkPolicy
+                     GlobalNetworkPolicy (order,  (L7: HTTP methods/
+                     deny rules, host endpoints)  paths, DNS/FQDN rules)
+  Observability      flow logs (more in paid      Hubble: live flows,
+                     editions)                    service map, drops
+  Extras             BGP peering with physical    Service mesh features,
+                     routers, IPAM pools          Cluster Mesh, Gateway
+                                                  API, bandwidth mgr
+  Seen in            enterprise/on-prem, EKS/AKS  GKE Dataplane V2,
+                     policy add-on                AKS (Azure CNI by
+                                                  Cilium), EKS options
+
+
+2. BEYOND STANDARD NETWORKPOLICY
+--------------------------------
+Standard NetworkPolicy: L3/L4 (IPs, ports), allow-only, namespaced.
+Extensions add:
+  - explicit DENY rules and rule ORDER (Calico)
+  - CLUSTER-WIDE policies (Calico GlobalNetworkPolicy,
+    CiliumClusterwideNetworkPolicy)
+  - L7: "only GET /api/*" (Cilium)
+  - DNS-based egress: "only to *.amazonaws.com" (Cilium toFQDNs,
+    Calico Enterprise)
+(The upstream "AdminNetworkPolicy" API aims to standardise cluster-
+wide/admin policies.)
+
+
+3. WHEN TO CHOOSE WHICH
+-----------------------
+Calico: you need BGP with your data-centre network, mixed Windows
+nodes, or a proven simple iptables setup.
+Cilium: large scale, eBPF performance, L7 policies, deep visibility
+with Hubble, kube-proxy replacement.
+Both are excellent; most cloud providers now offer one of them.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Both enforce NetworkPolicy; extensions differ.
+- Cilium = eBPF + Hubble + L7; Calico = flexible routing (BGP) +
+  ordered/global policies.

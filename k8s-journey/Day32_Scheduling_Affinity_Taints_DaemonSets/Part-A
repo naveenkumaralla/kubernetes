@@ -1,0 +1,121 @@
+==================================================================
+DAY 32 - PART A: THEORY
+Scheduling: nodeSelector, Affinity, Taints/Tolerations, DaemonSets
+Time: 40-45 minutes
+==================================================================
+
+1. HOW THE SCHEDULER DECIDES
+----------------------------
+For each Pending pod:
+  FILTER  remove nodes that can't run it (not enough requests,
+          nodeSelector/affinity mismatch, taint not tolerated, port
+          conflict, volume zone ...)
+  SCORE   rank the rest (spread, least loaded, affinity preferences,
+          image already present ...)
+  BIND    write the best node into spec.nodeName
+
+
+2. nodeSelector (simple)
+------------------------
+  k label node lab-worker disktype=ssd
+  spec:
+    nodeSelector:
+      disktype: ssd
+Pod only goes to nodes with ALL these labels.
+
+Built-in node labels: kubernetes.io/hostname, kubernetes.io/os,
+kubernetes.io/arch, topology.kubernetes.io/zone (cloud),
+node.kubernetes.io/instance-type (cloud).
+
+
+3. NODE AFFINITY (expressive)
+-----------------------------
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:     # hard rule
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: disktype
+            operator: In           # In, NotIn, Exists, DoesNotExist, Gt, Lt
+            values: [ssd, nvme]
+      preferredDuringSchedulingIgnoredDuringExecution:    # soft, weighted
+      - weight: 50
+        preference:
+          matchExpressions:
+          - key: zone
+            operator: In
+            values: [a]
+
+"IgnoredDuringExecution": if node labels change later, running pods
+are not moved.
+
+
+4. POD AFFINITY / ANTI-AFFINITY
+-------------------------------
+Place pods relative to OTHER PODS:
+  podAffinity       "put me near pods with app=cache" (same node/zone)
+  podAntiAffinity   "keep replicas of app=web apart" (HA!)
+  topologyKey decides what "near" means:
+    kubernetes.io/hostname         same node
+    topology.kubernetes.io/zone    same zone
+
+TopologySpreadConstraints is a newer, simpler way to spread evenly:
+  topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule    # or ScheduleAnyway
+    labelSelector:
+      matchLabels: {app: web}
+
+
+5. TAINTS AND TOLERATIONS (node repels pods)
+--------------------------------------------
+Affinity ATTRACTS pods to nodes. Taints REPEL pods from nodes unless
+the pod has a matching TOLERATION.
+
+  k taint node lab-worker2 gpu=true:NoSchedule
+  tolerations:
+  - key: gpu
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+
+Effects:
+  NoSchedule        new pods without toleration won't be scheduled
+  PreferNoSchedule  try to avoid
+  NoExecute         also EVICT running pods without toleration
+
+A toleration ALLOWS, it doesn't ATTRACT. For dedicated nodes use taint
++ toleration + nodeAffinity together.
+
+The control-plane node has taint node-role.kubernetes.io/control-plane
+:NoSchedule; that's why your pods never land there. Nodes that fail
+get node.kubernetes.io/not-ready:NoExecute; pods tolerate it for 300 s
+by default, then get evicted and rescheduled.
+
+
+6. DAEMONSETS
+-------------
+One pod on EVERY node (or every matching node). New node -> pod added
+automatically. Used for node agents: kube-proxy, CNI, log shippers
+(Fluent Bit), monitoring (node-exporter), security agents.
+DaemonSets usually tolerate taints so they run everywhere.
+
+
+7. MANUAL AND OTHER CONTROLS
+----------------------------
+  nodeName: lab-worker      bypasses the scheduler (debugging only)
+  k cordon NODE             mark unschedulable
+  k drain NODE              cordon + evict pods (maintenance)
+  k uncordon NODE
+  PriorityClass             important pods can preempt less important
+  PodDisruptionBudget       limit voluntary evictions (drain) so N
+                            replicas stay up
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Filter, score, bind.
+- nodeSelector/affinity attract; taints repel; tolerations permit.
+- Anti-affinity / topology spread = HA across nodes and zones.
+- DaemonSet = one pod per node.

@@ -1,0 +1,63 @@
+==================================================================
+DAY 52 - PART A: THEORY
+TLS Certificates and cert-manager
+Time: 40 minutes
+==================================================================
+
+1. TLS AT THE INGRESS
+---------------------
+Users connect with HTTPS to the ingress controller (or cloud LB),
+which terminates TLS using a certificate stored in a kubernetes.io/tls
+Secret (Day 19 Step 8, made by hand with openssl). Certificates
+expire (Let's Encrypt: 90 days). Renewing by hand across many apps
+doesn't work.
+
+
+2. cert-manager
+---------------
+A controller that issues and RENEWS certificates automatically.
+CRDs:
+  Issuer / ClusterIssuer   where certificates come from:
+                           SelfSigned, CA (your own CA), ACME (Let's
+                           Encrypt, ZeroSSL), Vault, cloud CAs
+  Certificate              "I want a cert for these DNS names, put it
+                           in Secret X"; renewed before expiry
+  CertificateRequest, Order, Challenge   internal steps (ACME)
+
+
+3. INGRESS SHORTCUT
+-------------------
+Annotate an Ingress; cert-manager creates the Certificate for you:
+  metadata:
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+  spec:
+    tls:
+    - hosts: [shop.example.com]
+      secretName: shop-tls
+
+
+4. ACME (LET'S ENCRYPT) CHALLENGES
+----------------------------------
+Let's Encrypt must verify you control the domain:
+  HTTP-01  it fetches http://<domain>/.well-known/acme-challenge/<token>
+           cert-manager serves this via a temporary Ingress. Needs the
+           domain to resolve publicly to your ingress.
+  DNS-01   you prove control with a TXT record (cert-manager uses
+           Route 53/Cloudflare/Azure DNS APIs). Works for private
+           clusters and wildcards (*.example.com).
+Use the STAGING server first (rate limits on production).
+In a local kind lab you can't do public ACME, so we use a private CA.
+
+
+5. INSIDE THE CLUSTER
+---------------------
+cert-manager also issues certs for internal mTLS, webhooks, and
+databases. Service meshes (Istio, Linkerd) automate pod-to-pod mTLS.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- TLS lives in kubernetes.io/tls Secrets used by Ingress.
+- cert-manager: Issuer -> Certificate -> Secret, auto-renewed.
+- HTTP-01 needs public reachability; DNS-01 works anywhere.

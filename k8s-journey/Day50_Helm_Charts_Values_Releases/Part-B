@@ -1,0 +1,110 @@
+==================================================================
+DAY 50 - PART B: LAB
+Install, customize, upgrade and roll back a chart
+Time: 75-90 minutes
+==================================================================
+
+STEP 0: Cluster and Helm
+------------------------
+kubectx kind-lab
+k get nodes ; k get pods -n ingress-nginx       # from Day 19
+(If needed: kind create cluster --name lab --config ~/k8s-journey/kind/kind-ingress.yaml
+ and reinstall the ingress controller, Day 19 Step 2.)
+helm version || curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+mkdir -p ~/k8s-journey/week8/helm && cd $_
+
+
+STEP 1: Add a repo and look at a chart
+--------------------------------------
+helm repo add podinfo https://stefanprodan.github.io/podinfo
+helm repo update
+helm search repo podinfo
+helm show chart podinfo/podinfo
+helm show values podinfo/podinfo > podinfo-defaults.yaml
+less podinfo-defaults.yaml        # find replicaCount, ui.color, ui.message, ingress
+
+
+STEP 2: Install with defaults
+-----------------------------
+helm install demo podinfo/podinfo -n helm-demo --create-namespace
+helm list -n helm-demo
+k get all -n helm-demo
+k get secret -n helm-demo -l owner=helm      # release storage
+helm get manifest demo -n helm-demo | head -40
+
+
+STEP 3: Customize with a values file
+------------------------------------
+vi values-dev.yaml
+
+replicaCount: 2
+ui:
+  color: "#34577c"
+  message: "Hello from Helm (dev)"
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+  - host: podinfo.local
+    paths:
+    - path: /
+      pathType: Prefix
+
+helm template demo podinfo/podinfo -f values-dev.yaml | less      # preview
+helm upgrade demo podinfo/podinfo -n helm-demo -f values-dev.yaml
+helm history demo -n helm-demo
+curl -s -H "Host: podinfo.local" localhost | grep -E "message|color"
+
+
+STEP 4: Override with --set
+---------------------------
+helm upgrade demo podinfo/podinfo -n helm-demo -f values-dev.yaml --set replicaCount=4
+k get pods -n helm-demo
+helm get values demo -n helm-demo          # user-supplied values
+helm get values demo -n helm-demo --all | head -20
+
+
+STEP 5: Rollback
+----------------
+helm upgrade demo podinfo/podinfo -n helm-demo -f values-dev.yaml --set image.tag=does-not-exist
+k get pods -n helm-demo                    # ImagePullBackOff on new pods
+helm history demo -n helm-demo
+helm rollback demo 3 -n helm-demo          # pick the last good revision
+helm history demo -n helm-demo
+k get pods -n helm-demo
+
+
+STEP 6: Safe upgrades with --atomic / --wait
+--------------------------------------------
+helm upgrade demo podinfo/podinfo -n helm-demo -f values-dev.yaml \
+  --set image.tag=nope --atomic --timeout 60s
+Helm waits, sees failure, and rolls back automatically.
+
+
+STEP 7: Two releases of the same chart
+--------------------------------------
+cp values-dev.yaml values-prod.yaml
+Edit values-prod.yaml: replicaCount 3, message "Hello (prod)", host
+podinfo-prod.local, a different color.
+helm upgrade --install prod podinfo/podinfo -n helm-prod --create-namespace -f values-prod.yaml
+helm list -A
+curl -s -H "Host: podinfo-prod.local" localhost | grep message
+
+
+STEP 8: Pin chart versions
+--------------------------
+helm search repo podinfo/podinfo --versions | head -5
+helm upgrade prod podinfo/podinfo -n helm-prod -f values-prod.yaml --version <a-specific-version>
+Always pin --version in automation so upgrades are deliberate.
+
+
+STEP 9: Clean up and commit
+---------------------------
+helm uninstall demo -n helm-demo ; helm uninstall prod -n helm-prod
+k delete ns helm-demo helm-prod
+cd ~/k8s-journey && git add . && git commit -m "day50: helm basics"

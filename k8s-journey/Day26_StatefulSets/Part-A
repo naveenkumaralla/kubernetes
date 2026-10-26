@@ -1,0 +1,87 @@
+==================================================================
+DAY 26 - PART A: THEORY
+StatefulSets: Stable Identity and Storage
+Time: 40 minutes
+==================================================================
+
+1. WHY DEPLOYMENTS DON'T FIT DATABASES
+--------------------------------------
+Deployment pods are interchangeable: random names, start in any order,
+all share ONE PVC (if any). A database cluster needs:
+  - stable names (db-0 is the primary, db-1 a replica)
+  - stable network identity (others connect to db-0 specifically)
+  - its OWN disk per replica that follows it after rescheduling
+  - ordered startup/shutdown
+
+
+2. WHAT A STATEFULSET GUARANTEES
+--------------------------------
+  Stable names         web-0, web-1, web-2 (ordinal index)
+  Stable DNS           web-0.web.default.svc.cluster.local
+                       (needs a HEADLESS Service, field serviceName)
+  Stable storage       volumeClaimTemplates -> one PVC per pod:
+                       data-web-0, data-web-1 ... The PVC is NOT
+                       deleted when the pod or the StatefulSet is
+                       deleted (unless you set
+                       persistentVolumeClaimRetentionPolicy).
+  Ordered operations   create 0, then 1, then 2 (each Ready first);
+                       delete in reverse; rolling update from highest
+                       ordinal down.
+
+
+3. YAML
+-------
+  apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    name: web
+  spec:
+    serviceName: web          # headless Service name
+    replicas: 3
+    selector:
+      matchLabels: {app: web}
+    template:
+      metadata:
+        labels: {app: web}
+      spec:
+        containers:
+        - name: nginx
+          image: nginx:1.27
+          volumeMounts:
+          - name: data
+            mountPath: /usr/share/nginx/html
+    volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+
+
+4. OPTIONS
+----------
+podManagementPolicy: Parallel      start/stop all at once (no order)
+updateStrategy:
+  RollingUpdate  (default) with "partition: N" for canary: only pods
+                 with ordinal >= N are updated
+  OnDelete       update a pod only when you delete it
+
+
+5. WHAT A STATEFULSET DOES NOT DO
+---------------------------------
+It doesn't know how to replicate your database, elect a primary, or
+take backups. It gives identity + storage; the app (or an OPERATOR,
+Week 9) does the clustering logic.
+
+Production reality: most teams use MANAGED databases (RDS, Cloud SQL,
+Azure Database) or a database operator (CloudNativePG, Percona,
+Strimzi for Kafka) rather than hand-written StatefulSets.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- StatefulSet = stable name + stable DNS + per-pod PVC + ordering.
+- Needs a headless Service.
+- PVCs survive pod and StatefulSet deletion.

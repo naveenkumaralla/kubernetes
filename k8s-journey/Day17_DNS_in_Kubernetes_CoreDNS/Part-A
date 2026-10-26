@@ -1,0 +1,87 @@
+==================================================================
+DAY 17 - PART A: THEORY
+DNS in Kubernetes (CoreDNS)
+Time: 30-40 minutes
+==================================================================
+
+1. WHO PROVIDES DNS?
+--------------------
+CoreDNS runs as a Deployment in kube-system, behind a Service called
+"kube-dns" (ClusterIP usually 10.96.0.10). The kubelet writes that IP
+into every pod's /etc/resolv.conf.
+
+CoreDNS watches the API server for Services and Pods and answers DNS
+questions about them. Its config is a ConfigMap called "coredns"
+(the Corefile).
+
+
+2. SERVICE DNS NAMES
+--------------------
+For Service "backend" in namespace "shop":
+
+  backend.shop.svc.cluster.local
+     |      |   |      |
+  service  ns  fixed  cluster domain
+
+Records:
+  A/AAAA   -> the ClusterIP (normal Service)
+  A/AAAA   -> each pod IP  (headless Service)
+  SRV      -> _http._tcp.backend.shop.svc.cluster.local (named ports)
+
+StatefulSet pods behind a headless Service also get their own names:
+  web-0.web.shop.svc.cluster.local  (Week 4)
+
+
+3. SEARCH DOMAINS: WHY "backend" WORKS
+--------------------------------------
+A pod in namespace "shop" has /etc/resolv.conf like:
+
+  nameserver 10.96.0.10
+  search shop.svc.cluster.local svc.cluster.local cluster.local
+  options ndots:5
+
+When you look up "backend", the resolver tries:
+  backend.shop.svc.cluster.local      <- found
+So:
+  "backend"        works within the same namespace
+  "backend.shop"   works from any namespace
+  full name        always works
+
+
+4. ndots:5 AND EXTERNAL NAMES
+-----------------------------
+A name with fewer than 5 dots is tried with each search domain FIRST.
+"api.github.com" (2 dots) causes several failed lookups before the
+real one. That's extra latency. Fixes: use a trailing dot
+("api.github.com.") or lower ndots in pod dnsConfig.
+
+
+5. EXTERNAL NAMES
+-----------------
+Names CoreDNS doesn't own are forwarded to the node's upstream DNS
+(the "forward . /etc/resolv.conf" line in the Corefile).
+
+
+6. dnsPolicy
+------------
+  ClusterFirst (default)   use CoreDNS
+  Default                  use the node's DNS settings
+  None                     use only what you set in dnsConfig
+  ClusterFirstWithHostNet  for hostNetwork pods
+
+
+7. WHEN DNS BREAKS
+------------------
+Symptoms: "could not resolve host", slow first requests.
+Check in this order:
+  1. Is CoreDNS running?   k get pods -n kube-system -l k8s-app=kube-dns
+  2. Does the Service exist, in which namespace?
+  3. From a pod: nslookup name; cat /etc/resolv.conf
+  4. CoreDNS logs:         k logs -n kube-system -l k8s-app=kube-dns
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- <service>.<namespace>.svc.cluster.local
+- Search domains let you use short names.
+- CoreDNS config = ConfigMap "coredns" in kube-system.

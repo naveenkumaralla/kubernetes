@@ -1,0 +1,31 @@
+==================================================================
+DAY 13 - PART C: CHECKPOINT
+==================================================================
+
+1. Name the four built-in namespaces and what each is for.
+Ans:
+
+
+2. Give three namespaced and three cluster-scoped resource types.
+Ans:
+
+
+3. Do namespaces block network traffic between pods? How would you
+   block it?
+Ans:
+
+
+4. What is the full DNS name of Service "web" in namespace "prod"?
+Ans:
+
+
+5. What happens when you delete a namespace?
+Ans:
+
+
+6. Compare imperative commands and declarative apply: pros and cons.
+Ans:
+
+
+7. What does "idempotent" mean for k apply?
+Ans:

@@ -1,0 +1,30 @@
+==================================================================
+DAY 36 - PART C: CHECKPOINT
+==================================================================
+
+1. List the stages of the API server request pipeline in order.
+Ans:
+
+
+2. Mutating vs validating admission: give one example of each.
+Ans:
+
+
+3. Why are control plane components run as static pods?
+Ans:
+
+
+4. How many etcd members can fail in a 3-member cluster? In 5?
+Ans:
+
+
+5. Under which etcd key is Deployment "web" in namespace "prod"?
+Ans:
+
+
+6. What does --dry-run=server do that --dry-run=client doesn't?
+Ans:
+
+
+7. What are Leases used for in kube-system?
+Ans:

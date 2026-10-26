@@ -1,0 +1,34 @@
+==================================================================
+DAY 14 - PART C: WEEK 2 SELF-TEST
+==================================================================
+
+1. Write (from memory) a minimal Deployment YAML for nginx with 2
+   replicas.
+Ans:
+
+
+2. A pod keeps getting recreated after you delete it. Why, and how do
+   you remove it permanently?
+Ans:
+
+
+3. You changed a Deployment's replicas from 3 to 5. Did a new
+   revision get created? Why?
+Ans:
+
+
+4. How many FAILs did you see in the checkpoint, and what could cause
+   them? (Hint: readiness probes, Week 5.)
+Ans:
+
+
+5. How do you roll back to revision 2?
+Ans:
+
+
+6. You deleted namespace "week2". What was deleted?
+Ans:
+
+
+7. Mistakes log: one error from this week and its fix.
+Ans:

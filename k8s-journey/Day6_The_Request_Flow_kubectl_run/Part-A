@@ -1,0 +1,91 @@
+==================================================================
+DAY 6 - PART A: THEORY
+The Request Flow: What Happens When You Run "kubectl run"
+Time: 30-40 minutes
+==================================================================
+
+1. THE 8 STEPS
+--------------
+When you type:   k run web --image=nginx
+
+ 1. kubectl reads ~/.kube/config and sends an authenticated HTTPS
+    POST request to the API server.
+
+ 2. The API server runs three checks:
+      Authentication  - who are you? (certificate, token)
+      Authorization   - are you allowed? (RBAC)
+      Admission       - validate or modify the request (defaults,
+                        quotas, policies)
+
+ 3. The API server stores the Pod object in etcd.
+    The pod now EXISTS, but has no node assigned (status: Pending).
+
+ 4. The scheduler, which is watching the API server, sees a pod with
+    no node. It filters nodes that fit, scores them, and writes the
+    chosen node name into the pod (spec.nodeName). This is "binding".
+
+ 5. The kubelet on that node, also watching, sees a pod assigned to it.
+
+ 6. The kubelet asks containerd (via CRI) to pull the image and start
+    the container. The CNI plugin gives the pod an IP address.
+
+ 7. The kubelet reports status (Running, pod IP) back to the API
+    server, which saves it in etcd.
+
+ 8. "kubectl get pods" reads that status from the API server.
+
+
+2. THE KEY INSIGHT: NOBODY CALLS ANYBODY
+----------------------------------------
+The scheduler does not call the kubelet. The kubelet does not call the
+scheduler. Every component WATCHES the API server and reacts to
+changes. This "hub and spoke" design makes the system loosely coupled
+and resilient: if the scheduler restarts, it just catches up.
+
+   kubectl --POST--> API server <--watch-- scheduler
+                        |   ^
+                      etcd  +----watch---- kubelet (each node)
+
+
+3. spec vs status
+-----------------
+Every Kubernetes object has two halves:
+  spec    = what you WANT   (written by you)
+  status  = what EXISTS     (written by Kubernetes)
+This is the desired/actual model from Day 5, inside every object.
+
+
+4. POD PHASES AND COMMON STATUSES
+---------------------------------
+Phases:  Pending -> Running -> Succeeded or Failed  (also Unknown)
+
+Statuses you will see in "k get pods":
+  ContainerCreating   image is being pulled / container starting
+  Running             at least one container is running
+  Completed           container exited with code 0
+  ErrImagePull        first failure pulling the image
+  ImagePullBackOff    retrying the pull with growing delays
+  CrashLoopBackOff    container keeps starting and crashing
+  Pending             not scheduled yet (no node fits) or waiting
+
+
+5. EVENTS
+---------
+Kubernetes records what happens to objects as Events:
+  Scheduled -> Pulling -> Pulled -> Created -> Started
+Events are the FIRST place to look when something is wrong.
+They expire after about 1 hour.
+
+
+6. A BARE POD HAS NO BABYSITTER
+-------------------------------
+A pod created with "k run" is not managed by any controller.
+If you delete it, or its node dies, nothing recreates it.
+That is why real apps use Deployments (Week 2).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- API server stores; scheduler picks a node; kubelet runs it.
+- All components watch the API server instead of calling each other.
+- Debug habit: describe first (events), then logs.

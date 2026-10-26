@@ -1,0 +1,26 @@
+==================================================================
+DAY 50 - PART C: CHECKPOINT
+==================================================================
+
+1. Chart, values, release, revision: define each.
+Ans:
+
+
+2. Where does Helm store release history?
+Ans:
+
+
+3. What is the order of precedence for values?
+Ans:
+
+
+4. What does --atomic do?
+Ans:
+
+
+5. How do you preview the YAML a chart will produce?
+Ans:
+
+
+6. Why pin chart versions in automation?
+Ans:

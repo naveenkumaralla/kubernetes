@@ -1,0 +1,106 @@
+==================================================================
+DAY 27 - PART A: THEORY
+Jobs and CronJobs: Backend and Batch Workloads
+Time: 40 minutes
+==================================================================
+
+1. RUN-TO-COMPLETION WORK
+-------------------------
+Deployments keep things running forever. Some work should run, finish,
+and stop: database migrations, report generation, data imports,
+backups, sending a batch of emails, ML training. That's a JOB.
+
+
+2. JOB YAML
+-----------
+  apiVersion: batch/v1
+  kind: Job
+  metadata:
+    name: report
+  spec:
+    completions: 1              # how many successful pods needed
+    parallelism: 1              # how many at the same time
+    backoffLimit: 4             # retries before the Job fails
+    activeDeadlineSeconds: 600  # kill if it runs longer
+    ttlSecondsAfterFinished: 3600   # auto-delete Job + pods after 1h
+    template:
+      spec:
+        restartPolicy: Never    # or OnFailure (Always is not allowed)
+        containers:
+        - name: report
+          image: python:3.12-slim
+          command: ["python", "-c", "print('report done')"]
+
+
+3. JOB PATTERNS
+---------------
+Single job               completions 1, parallelism 1
+Fixed count              completions 10, parallelism 3
+                         -> 10 successful runs, 3 at a time
+Work queue               parallelism N, completions unset; pods pull
+                         from a queue until empty (Week 9 with KEDA)
+Indexed job              completionMode: Indexed; each pod gets
+                         JOB_COMPLETION_INDEX 0..N-1 (process shard N)
+
+
+4. RETRIES AND FAILURE
+----------------------
+restartPolicy: Never      failed pod stays; a NEW pod is created
+                          (you can read logs of each attempt)
+restartPolicy: OnFailure  same pod, container restarted in place
+backoffLimit counts failures; delay grows 10s, 20s, 40s ... (max 6m).
+When exceeded -> Job condition Failed, reason BackoffLimitExceeded.
+Pods are kept for debugging until the Job is deleted (or TTL).
+
+podFailurePolicy (advanced): e.g. don't retry on exit code 42
+(a real bug), but do retry when the node disappears.
+
+
+5. CRONJOB
+----------
+Creates a Job on a schedule (standard cron syntax, in the
+kube-controller-manager's time zone, usually UTC, or set timeZone):
+
+  apiVersion: batch/v1
+  kind: CronJob
+  metadata:
+    name: nightly-backup
+  spec:
+    schedule: "30 2 * * *"         # 02:30 every day
+    timeZone: "Asia/Kolkata"
+    concurrencyPolicy: Forbid      # Allow | Forbid | Replace
+    startingDeadlineSeconds: 300
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 1
+    suspend: false
+    jobTemplate:
+      spec:
+        template:
+          spec:
+            restartPolicy: OnFailure
+            containers: [...]
+
+Cron syntax: minute hour day-of-month month day-of-week
+  "*/5 * * * *"   every 5 minutes
+  "0 * * * *"     every hour
+  "0 9 * * 1-5"   09:00 on weekdays
+
+concurrencyPolicy:
+  Allow    runs may overlap (default)
+  Forbid   skip the new run if the previous is still running
+  Replace  kill the old run, start the new one
+
+
+6. MAKE JOBS IDEMPOTENT
+-----------------------
+A Job pod may run more than once (retries, node failure). Design the
+work so running twice is safe (e.g. "create table if not exists",
+upserts, write to a temp file then rename).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Job = run to completion; restartPolicy Never or OnFailure.
+- completions / parallelism / backoffLimit / ttlSecondsAfterFinished.
+- CronJob = Job on a schedule; concurrencyPolicy controls overlap.
+- Jobs must be safe to run twice.

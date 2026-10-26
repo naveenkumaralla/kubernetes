@@ -1,0 +1,80 @@
+==================================================================
+DAY 49 - PART B: LAB (WEEK 7 CHECKPOINT)
+Build it all from code, verify, tear it all down, prove $0 running
+Time: 120 minutes
+==================================================================
+
+GOAL
+----
+In one session: create the cluster, deploy your app from ECR with an
+ALB Ingress, EBS-backed Postgres, S3 access via Pod Identity, an HPA,
+then delete everything and prove nothing is left.
+
+
+STEP 1: Put the whole setup in scripts
+--------------------------------------
+cd ~/k8s-journey/cloud/eks
+Create up.sh that runs, in order:
+  1. eksctl create cluster -f cluster.yaml
+  2. k apply -f storage/sc-gp3.yaml
+  3. metrics-server
+  4. AWS Load Balancer Controller (Day 45 Step 6)
+  5. your app: Deployment (ECR image, requests, probes), Service,
+     ALB Ingress, HPA
+  6. Postgres StatefulSet on gp3
+  7. Pod Identity association for an S3-reading ServiceAccount used by
+     your app's Deployment
+Create down.sh that deletes in the RIGHT order:
+  1. Ingress + LoadBalancer Services (wait 90 s)
+  2. StatefulSets + PVCs (EBS disks)
+  3. helm releases
+  4. pod identity associations / iamserviceaccounts
+  5. eksctl delete cluster --wait
+  6. checks (Step 4)
+
+
+STEP 2: Run up.sh and verify
+----------------------------
+[ ] curl http://<ALB>/ returns your app from several pods
+[ ] k exec into an app pod: aws s3 ls s3://<bucket> works
+[ ] Postgres data survives deleting pg-0
+[ ] k get hpa shows a target
+[ ] k get nodes -L topology.kubernetes.io/zone shows 2 AZs
+
+Note the start time.
+
+
+STEP 3: Run down.sh
+-------------------
+Note the end time. Calculate the approximate cost of the session
+(hours x hourly estimate from Day 43).
+
+
+STEP 4: Prove nothing is left
+-----------------------------
+REGION=ap-south-1
+aws eks list-clusters --region $REGION
+aws ec2 describe-instances --filters Name=instance-state-name,Values=running --query 'Reservations[].Instances[].InstanceId'
+aws ec2 describe-nat-gateways --query 'NatGateways[?State==`available`].NatGatewayId'
+aws ec2 describe-addresses --query 'Addresses[].PublicIp'
+aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerName'
+aws elb describe-load-balancers --query 'LoadBalancerDescriptions[].LoadBalancerName'
+aws ec2 describe-volumes --filters Name=status,Values=available --query 'Volumes[].VolumeId'
+aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE DELETE_FAILED --query 'StackSummaries[].StackName'
+All should be empty (except things you intentionally keep: ECR repo,
+IAM policies, S3 bucket if you chose to).
+
+If a CloudFormation stack is DELETE_FAILED: usually a leftover LB or
+ENI blocks VPC deletion. Delete it in the console and retry
+"eksctl delete cluster".
+
+
+STEP 5: Check the bill
+----------------------
+Billing -> Bills / Cost Explorer (data appears with up to 24 h delay).
+Group by service. Which service cost the most this week?
+
+
+STEP 6: Commit
+--------------
+cd ~/k8s-journey && git add . && git commit -m "week7 complete"

@@ -1,0 +1,27 @@
+==================================================================
+DAY 61 - PART C: CHECKPOINT
+==================================================================
+
+1. What does a CRD add to the cluster? What does it NOT do?
+Ans:
+
+
+2. Where did the default color "blue" come from?
+Ans:
+
+
+3. What does the status subresource give you?
+Ans:
+
+
+4. How did deleting the Website remove the Deployment?
+Ans:
+
+
+5. Why is a real controller written with controller-runtime better
+   than this bash loop? (list 3 reasons)
+Ans:
+
+
+6. Name five CRDs you've used in this course and their tools.
+Ans:

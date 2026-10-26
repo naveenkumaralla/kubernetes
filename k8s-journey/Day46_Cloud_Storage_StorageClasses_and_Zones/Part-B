@@ -1,0 +1,97 @@
+==================================================================
+DAY 46 - PART B: LAB
+EBS volumes from Kubernetes
+Time: 90 minutes
+==================================================================
+
+STEP 1: Cluster
+---------------
+cd ~/k8s-journey/cloud/eks && eksctl create cluster -f cluster.yaml
+k get pods -n kube-system -l app.kubernetes.io/name=aws-ebs-csi-driver
+k get csidriver
+k get storageclass
+
+
+STEP 2: Create a gp3 StorageClass
+---------------------------------
+mkdir -p ~/k8s-journey/cloud/eks/storage && cd $_
+Write sc-gp3.yaml with the StorageClass from Part A, then:
+k apply -f sc-gp3.yaml
+k get sc          # gp3 (default)
+If another class is also marked default, remove its annotation:
+  k annotate sc gp2 storageclass.kubernetes.io/is-default-class- 2>/dev/null
+
+
+STEP 3: PostgreSQL on EBS (reuse Day 26)
+----------------------------------------
+cp ~/k8s-journey/manifests/week4/sts-postgres.yaml .
+k create secret generic pg --from-literal=POSTGRES_PASSWORD=pgpass
+k apply -f sts-postgres.yaml
+k get pvc -w              # Pending -> Bound once pg-0 is scheduled
+k get pv -o custom-columns=PV:.metadata.name,SIZE:.spec.capacity.storage,ZONE:.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values[0]
+k get pod pg-0 -o wide ; k get nodes -L topology.kubernetes.io/zone
+
+
+STEP 4: Find the real disk
+--------------------------
+VOL=$(k get pv $(k get pvc pgdata-pg-0 -o jsonpath='{.spec.volumeName}') -o jsonpath='{.spec.csi.volumeHandle}')
+echo $VOL
+aws ec2 describe-volumes --volume-ids $VOL \
+  --query 'Volumes[0].{Type:VolumeType,Size:Size,AZ:AvailabilityZone,Encrypted:Encrypted,State:State,Attached:Attachments[0].InstanceId}' --output table
+Also find it in the EC2 console -> Volumes (tags show the PVC name).
+
+
+STEP 5: Persistence across node replacement
+-------------------------------------------
+k exec -it pg-0 -- psql -U postgres -c "create table t(x text); insert into t values('on ebs');"
+NODE=$(k get pod pg-0 -o jsonpath='{.spec.nodeName}')
+k drain $NODE --ignore-daemonsets --delete-emptydir-data
+k get pod pg-0 -o wide -w
+The pod restarts on another node IN THE SAME AZ (if one exists) and
+the volume detaches/attaches. If no node in that AZ: Pending with
+"volume node affinity conflict" -> scale the node group and observe.
+k exec -it pg-0 -- psql -U postgres -c "select * from t;"
+k uncordon $NODE
+
+
+STEP 6: Online volume expansion
+-------------------------------
+k patch pvc pgdata-pg-0 -p '{"spec":{"resources":{"requests":{"storage":"3Gi"}}}}'
+k get pvc pgdata-pg-0 -w
+k exec pg-0 -- df -h /var/lib/postgresql/data
+aws ec2 describe-volumes --volume-ids $VOL --query 'Volumes[0].Size'
+
+
+STEP 7 (OPTIONAL): Snapshot
+---------------------------
+Volume snapshots need the snapshot CRDs + snapshot-controller (EKS
+add-on "snapshot-controller"):
+  eksctl create addon --cluster lab --name snapshot-controller
+Then create a VolumeSnapshotClass (driver ebs.csi.aws.com) and a
+VolumeSnapshot of pgdata-pg-0, and check EC2 -> Snapshots.
+(Delete the snapshot afterwards; snapshots cost money too.)
+
+
+STEP 8: Reclaim policy reality check
+------------------------------------
+k delete sts pg ; k delete pvc pgdata-pg-0
+sleep 30 ; aws ec2 describe-volumes --volume-ids $VOL 2>&1 | head -3
+-> InvalidVolume.NotFound: the EBS disk was deleted (reclaimPolicy
+   Delete). For production data use Retain + snapshots.
+
+
+STEP 9: CLEAN UP
+----------------
+k delete secret pg ; k delete svc pg
+aws ec2 describe-volumes --filters Name=tag-key,Values=kubernetes.io/created-for/pvc/name \
+  --query 'Volumes[].VolumeId'          # should be empty
+eksctl delete cluster -f ~/k8s-journey/cloud/eks/cluster.yaml --wait
+
+
+STEP 10: AKS / GKE equivalents
+------------------------------
+AKS: built-in classes managed-csi (Azure Disk), azurefile-csi (RWX)
+GKE: standard-rwo (PD balanced, default), premium-rwo; Filestore CSI for RWX
+Both are installed and default out of the box.
+
+cd ~/k8s-journey && git add . && git commit -m "day46: cloud storage"

@@ -1,0 +1,127 @@
+==================================================================
+DAY 41 - PART B: LAB
+Break things on purpose and fix them
+Time: 120 minutes
+==================================================================
+
+Use the kubeadm cluster (some faults need real nodes). For each
+scenario: break it, observe the SYMPTOM first, then diagnose with the
+method, then fix. Record everything in Part C.
+
+
+SCENARIO 1: ImagePullBackOff
+----------------------------
+k create deploy s1 --image=nginx:1.27-typo
+Diagnose: k get pods ; k describe pod -l app=s1 | tail -5
+Fix:      k set image deploy/s1 nginx=nginx:1.27
+
+
+SCENARIO 2: CrashLoopBackOff
+----------------------------
+k create deploy s2 --image=busybox:1.36 -- sh -c "echo config missing: DB_URL; exit 3"
+Diagnose: k logs deploy/s2 ; k logs deploy/s2 --previous
+          k get pod -l app=s2 -o jsonpath='{.items[0].status.containerStatuses[0].lastState.terminated.exitCode}'
+Fix:      change the command to sleep 3600 (k edit deploy s2)
+
+
+SCENARIO 3: Pending (resources)
+-------------------------------
+k create deploy s3 --image=nginx:1.27
+k set resources deploy s3 --requests=memory=64Gi
+Diagnose: k describe pod -l app=s3 | grep -A3 Events
+Fix:      k set resources deploy s3 --requests=memory=64Mi
+
+
+SCENARIO 4: Pending (taint)
+---------------------------
+k taint node worker1 broken=true:NoSchedule
+k taint node worker2 broken=true:NoSchedule
+k create deploy s4 --image=nginx:1.27
+Diagnose: events -> "untolerated taint"
+Fix:      k taint node worker1 broken- ; k taint node worker2 broken-
+
+
+SCENARIO 5: Service has no endpoints
+------------------------------------
+k create deploy s5 --image=nginx:1.27
+k create service clusterip s5 --tcp=80:8080
+k run t --rm -it --image=busybox:1.36 -- wget -qO- -T 2 s5
+Diagnose: k get endpointslices -l kubernetes.io/service-name=s5 ;
+          compare targetPort with containerPort
+Fix:      k patch svc s5 -p '{"spec":{"ports":[{"port":80,"targetPort":80}]}}'
+
+
+SCENARIO 6: Node NotReady (kubelet stopped)
+-------------------------------------------
+On worker2: sudo systemctl stop kubelet
+On cp1:     k get nodes -w     (NotReady after ~40 s)
+            k describe node worker2 | grep -A8 Conditions   ("Kubelet stopped posting node status")
+On worker2: systemctl status kubelet ; sudo systemctl start kubelet
+
+
+SCENARIO 7: Node NotReady (container runtime down)
+--------------------------------------------------
+On worker1: sudo systemctl stop containerd
+On cp1:     k get nodes ; k describe node worker1 | grep -i -A2 ready
+On worker1: sudo journalctl -u kubelet --no-pager | tail -5    ("container runtime is down")
+            sudo systemctl start containerd
+
+
+SCENARIO 8: Broken kubelet config
+---------------------------------
+On worker1:
+  sudo cp /var/lib/kubelet/config.yaml /root/kubelet-config.bak
+  sudo sed -i 's/cgroupDriver: systemd/cgroupDriver: cgroupfs/' /var/lib/kubelet/config.yaml
+  sudo systemctl restart kubelet
+  systemctl status kubelet ; sudo journalctl -u kubelet --no-pager | grep -i cgroup | tail -3
+Fix:
+  sudo cp /root/kubelet-config.bak /var/lib/kubelet/config.yaml && sudo systemctl restart kubelet
+
+
+SCENARIO 9: API server down (typo in manifest)
+----------------------------------------------
+On cp1:
+  sudo cp /etc/kubernetes/manifests/kube-apiserver.yaml /root/apiserver.bak
+  sudo sed -i 's/--secure-port=6443/--secure-prot=6443/' /etc/kubernetes/manifests/kube-apiserver.yaml
+  sleep 30 ; k get nodes           # connection refused
+Diagnose without kubectl:
+  sudo crictl ps -a | grep kube-apiserver
+  sudo crictl logs $(sudo crictl ps -a --name kube-apiserver -q | head -1) 2>&1 | tail -5
+  sudo journalctl -u kubelet --no-pager | grep -i apiserver | tail -3
+Fix:
+  sudo cp /root/apiserver.bak /etc/kubernetes/manifests/kube-apiserver.yaml
+  sleep 40 ; k get nodes
+
+
+SCENARIO 10: DNS broken
+-----------------------
+k scale deploy coredns -n kube-system --replicas=0
+k run t --rm -it --image=busybox:1.36 -- nslookup kubernetes.default
+Diagnose: works by IP? k get pods -n kube-system -l k8s-app=kube-dns
+Fix:      k scale deploy coredns -n kube-system --replicas=2
+
+
+SCENARIO 11: Debug a running distroless-style pod
+-------------------------------------------------
+k run slim --image=registry.k8s.io/pause:3.10
+k exec slim -- sh                        # fails: no shell in image
+k debug -it slim --image=nicolaka/netshoot --target=slim -- bash
+  ps aux         # you see the pause process (shared PID namespace)
+  ss -tlnp
+  exit
+
+
+SCENARIO 12: Debug a node from kubectl
+--------------------------------------
+k debug node/worker1 -it --image=busybox:1.36
+  chroot /host
+  systemctl status kubelet --no-pager | head -3   (may not work in all images)
+  df -h ; cat /var/lib/kubelet/config.yaml | head
+  exit
+k get pods | grep node-debugger ; k delete pod -l app=node-debugger 2>/dev/null || k delete pod $(k get pods -o name | grep node-debugger)
+
+
+CLEAN UP
+--------
+k delete deploy s1 s2 s3 s4 s5 ; k delete svc s5 ; k delete pod slim
+cd ~/k8s-journey && git add . && git commit -m "day41: break fix"

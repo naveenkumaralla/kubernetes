@@ -1,0 +1,41 @@
+==================================================================
+DAY 56 - PART A: THEORY (REVISION)
+Capstone: Everything Together
+Time: 30 minutes
+==================================================================
+
+Review the whole course in one picture:
+
+  Developer --push--> GitHub --Actions--> image registry
+                         |                     |
+                     config repo          (pulled by nodes)
+                         |
+                      Argo CD (in cluster) --sync-->
+  +----------------------------- cluster ------------------------------+
+  |  Ingress controller (TLS by cert-manager)                          |
+  |     |                                                              |
+  |  frontend (Deployment, HPA, probes, PDB)                           |
+  |     |  DNS: api                                                    |
+  |  api (Deployment, HPA, probes, ConfigMap, Secret, SA)              |
+  |     |  DNS: db-0.db                                                |
+  |  db (StatefulSet + PVC, or managed DB in the cloud)                |
+  |  NetworkPolicies: ingress -> frontend -> api -> db only            |
+  |  Prometheus/Grafana/Alertmanager watching everything               |
+  +--------------------------------------------------------------------+
+
+
+CAPSTONE REQUIREMENTS
+---------------------
+ 1. 3 tiers: frontend, API, database
+ 2. Images built by CI and pushed to a registry
+ 3. A Helm chart OR Kustomize overlays (dev + prod)
+ 4. Ingress with TLS from cert-manager
+ 5. Database with persistent storage; config in ConfigMap; password
+    in a Secret (not in Git in plain text)
+ 6. Requests/limits, probes, PDB, topology spread
+ 7. HPA on the API, tested with a load generator
+ 8. NetworkPolicies (on a Calico/Cilium cluster) or documented
+ 9. ServiceMonitor + at least one alert + a Grafana dashboard
+10. Deployed by Argo CD; a change in Git reaches the cluster
+11. Runs on kind; optionally on EKS for a few hours, then deleted
+12. A README describing architecture, how to deploy, how to roll back

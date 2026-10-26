@@ -1,0 +1,36 @@
+==================================================================
+DAY 5 - PART C: CHECKPOINT
+Answer without looking at your notes.
+==================================================================
+
+1. What is the only component that talks to etcd?
+Ans:
+
+
+2. Which component decides which node a pod runs on?
+Ans:
+
+
+3. What does the kubelet do? Where does it run?
+Ans:
+
+
+4. Explain the reconciliation loop in your own words.
+Ans:
+
+
+5. Why do you see the Kubernetes "nodes" as Docker containers in kind?
+Ans:
+
+
+6. What is a context in kubeconfig?
+Ans:
+
+
+7. Name the CNI plugin your kind cluster uses and the pod that runs it.
+Ans:
+
+
+8. Why can Kubernetes run an image you built with Docker or Podman
+   even though it uses containerd?
+Ans:

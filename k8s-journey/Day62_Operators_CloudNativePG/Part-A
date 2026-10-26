@@ -1,0 +1,63 @@
+==================================================================
+DAY 62 - PART A: THEORY
+Operators: Running Stateful Software the Kubernetes Way
+Time: 40 minutes
+==================================================================
+
+1. WHAT IS AN OPERATOR?
+-----------------------
+An operator = CRDs + a controller that encodes a human operator's
+knowledge of one piece of software: how to install it, configure
+replication, fail over, back up, restore, upgrade, scale.
+
+You write:
+  kind: Cluster
+  spec:
+    instances: 3
+    backup: { ... }
+The operator creates and continuously manages Pods, PVCs, Services,
+Secrets, certificates, replication, and promotes a new primary if the
+current one dies.
+
+
+2. POPULAR OPERATORS
+--------------------
+  Databases   CloudNativePG, Zalando Postgres, Percona (MySQL,
+              Mongo, Postgres), MariaDB operator, Redis operators
+  Messaging   Strimzi (Kafka), RabbitMQ Cluster Operator
+  Platform    Prometheus Operator (Day 53), cert-manager (Day 52),
+              Argo CD (Day 54), External Secrets, Crossplane (cloud
+              resources as CRDs)
+Find more at operatorhub.io / artifacthub.io.
+
+
+3. OPERATOR MATURITY (Operator SDK capability levels)
+-----------------------------------------------------
+  1 Basic install  2 Seamless upgrades  3 Full lifecycle (backup,
+  failure recovery)  4 Deep insights (metrics, alerts)
+  5 Auto pilot (auto-scaling, auto-tuning)
+
+
+4. CLOUDNATIVEPG IN BRIEF
+-------------------------
+- CRD "Cluster" (postgresql.cnpg.io/v1)
+- Manages pods directly (no StatefulSet), one PVC per instance
+- Streaming replication; automatic failover; switchover
+- Services:  <name>-rw (primary), <name>-ro (replicas), <name>-r (any)
+- Secret <name>-app with the app user's credentials
+- Backups to object storage (S3/Azure/GCS), point-in-time recovery
+- Rolling minor upgrades, Prometheus metrics
+
+
+5. THE TRADE-OFF
+----------------
+Operators make databases on Kubernetes realistic, but you now own the
+operator's upgrades, the storage performance, and the backups. Many
+teams still prefer managed DBs (Day 46).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Operator = CRD + domain-specific controller.
+- CloudNativePG: Cluster CR -> HA Postgres with failover and backups.
+- Use operators for complex stateful software you run yourself.

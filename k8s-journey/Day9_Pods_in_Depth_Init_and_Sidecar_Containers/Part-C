@@ -1,0 +1,30 @@
+==================================================================
+DAY 9 - PART C: CHECKPOINT
+==================================================================
+
+1. What do containers in the same pod share?
+Ans:
+
+
+2. When would you use an init container? Give two examples.
+Ans:
+
+
+3. In what order do init containers run, and what happens if one fails?
+Ans:
+
+
+4. What did each restartPolicy do in Step 5?
+Ans:
+
+
+5. Describe what happens, in order, when a pod is deleted.
+Ans:
+
+
+6. Why are pods with multiple containers the exception, not the rule?
+Ans:
+
+
+7. How do you read logs of a specific container in a pod?
+Ans:

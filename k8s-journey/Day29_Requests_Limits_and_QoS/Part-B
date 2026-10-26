@@ -1,0 +1,180 @@
+==================================================================
+DAY 29 - PART B: LAB
+Requests, limits, QoS, LimitRange, ResourceQuota
+Time: 90 minutes
+==================================================================
+
+mkdir -p ~/k8s-journey/manifests/week5 && cd ~/k8s-journey/manifests/week5
+
+
+STEP 1: Install metrics-server (kind needs insecure kubelet TLS)
+----------------------------------------------------------------
+k apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+k patch deploy metrics-server -n kube-system --type=json \
+  -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+k rollout status deploy/metrics-server -n kube-system
+sleep 60
+k top nodes
+k top pods -A
+
+
+STEP 2: What does a node have?
+------------------------------
+k describe node lab-worker | grep -A6 -E "^Allocatable|^Allocated resources"
+
+Allocatable = capacity minus what's reserved for the system.
+"Allocated resources" = sum of requests and limits of pods on it.
+
+
+STEP 3: Requests drive scheduling
+---------------------------------
+vi deploy-req.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hungry
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: hungry}
+  template:
+    metadata:
+      labels: {app: hungry}
+    spec:
+      containers:
+      - name: c
+        image: nginx:1.27
+        resources:
+          requests:
+            cpu: "1"
+            memory: "64Mi"
+
+k apply -f deploy-req.yaml
+k get pods -l app=hungry -o wide
+k scale deploy hungry --replicas=20
+k get pods -l app=hungry | grep -c Pending
+k describe pod $(k get pods -l app=hungry --field-selector=status.phase=Pending -o name | head -1) | tail -3
+
+"0/3 nodes are available: ... Insufficient cpu" even though the CPUs
+are almost idle (check k top nodes). Requests are reservations.
+k delete deploy hungry
+
+
+STEP 4: The three QoS classes
+-----------------------------
+vi qos.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qos-guaranteed
+spec:
+  containers:
+  - name: c
+    image: nginx:1.27
+    resources:
+      requests: {cpu: "100m", memory: "64Mi"}
+      limits:   {cpu: "100m", memory: "64Mi"}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qos-burstable
+spec:
+  containers:
+  - name: c
+    image: nginx:1.27
+    resources:
+      requests: {cpu: "100m", memory: "64Mi"}
+      limits:   {memory: "128Mi"}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qos-besteffort
+spec:
+  containers:
+  - name: c
+    image: nginx:1.27
+
+k apply -f qos.yaml
+k get pods -o custom-columns=NAME:.metadata.name,QOS:.status.qosClass
+
+
+STEP 5: See the cgroup limits on the node
+-----------------------------------------
+NODE=$(k get pod qos-guaranteed -o jsonpath='{.spec.nodeName}')
+CID=$(k get pod qos-guaranteed -o jsonpath='{.status.containerStatuses[0].containerID}' | cut -d/ -f3)
+docker exec $NODE sh -c "find /sys/fs/cgroup -path '*$CID*' -name memory.max -exec cat {} \;"
+docker exec $NODE sh -c "find /sys/fs/cgroup -path '*$CID*' -name cpu.max -exec cat {} \;"
+
+Expect 67108864 (64Mi) and "10000 100000" (0.1 CPU).
+Same files as Day 2: Kubernetes limits ARE cgroup limits.
+
+
+STEP 6: LimitRange (defaults)
+-----------------------------
+k create ns team-a
+vi limitrange.yaml
+
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+  namespace: team-a
+spec:
+  limits:
+  - type: Container
+    default:            # default LIMITS
+      cpu: "500m"
+      memory: "256Mi"
+    defaultRequest:     # default REQUESTS
+      cpu: "100m"
+      memory: "128Mi"
+    max:
+      cpu: "1"
+      memory: "512Mi"
+
+k apply -f limitrange.yaml
+k run plain -n team-a --image=nginx:1.27
+k get pod plain -n team-a -o jsonpath='{.spec.containers[0].resources}{"\n"}'
+   -> defaults were injected by admission
+
+k run toobig -n team-a --image=nginx:1.27 --overrides='{"spec":{"containers":[{"name":"toobig","image":"nginx:1.27","resources":{"limits":{"memory":"1Gi"}}}]}}'
+   -> Forbidden: maximum memory usage per Container is 512Mi
+
+
+STEP 7: ResourceQuota (totals)
+------------------------------
+vi quota.yaml
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-a-quota
+  namespace: team-a
+spec:
+  hard:
+    pods: "5"
+    requests.cpu: "1"
+    requests.memory: "1Gi"
+    limits.memory: "2Gi"
+    services: "3"
+    persistentvolumeclaims: "2"
+
+k apply -f quota.yaml
+k describe quota -n team-a
+k create deploy many -n team-a --image=nginx:1.27 --replicas=10
+k get pods -n team-a
+k describe quota -n team-a
+k get rs -n team-a ; k describe rs -n team-a | grep -i -m3 forbidden
+
+Only some pods start; the ReplicaSet reports "exceeded quota".
+
+
+STEP 8: Clean up and commit
+---------------------------
+k delete pod qos-guaranteed qos-burstable qos-besteffort
+k delete ns team-a
+cd ~/k8s-journey && git add . && git commit -m "day29: requests limits qos"

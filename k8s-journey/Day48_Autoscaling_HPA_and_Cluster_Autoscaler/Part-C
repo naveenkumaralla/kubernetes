@@ -1,0 +1,31 @@
+==================================================================
+DAY 48 - PART C: CHECKPOINT
+==================================================================
+
+1. What does averageUtilization: 50 mean exactly?
+Ans:
+
+
+2. Why does the HPA need CPU requests on the pods?
+Ans:
+
+
+3. What made the Cluster Autoscaler add nodes?
+Ans:
+
+
+4. Why did scale-down take longer than scale-up?
+Ans:
+
+
+5. Cluster Autoscaler vs Karpenter: two differences.
+Ans:
+
+
+6. Which workloads are suitable for Spot nodes? Which are not?
+Ans:
+
+
+7. Paste your HPA timeline: when load started, max replicas, nodes
+   added, when back to minimum.
+Ans:

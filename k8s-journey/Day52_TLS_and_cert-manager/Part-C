@@ -1,0 +1,26 @@
+==================================================================
+DAY 52 - PART C: CHECKPOINT
+==================================================================
+
+1. Issuer vs ClusterIssuer vs Certificate?
+Ans:
+
+
+2. What did the cert-manager.io/cluster-issuer annotation cause?
+Ans:
+
+
+3. Why didn't curl need -k in Step 4?
+Ans:
+
+
+4. HTTP-01 vs DNS-01: when must you use DNS-01?
+Ans:
+
+
+5. Why use the Let's Encrypt staging server first?
+Ans:
+
+
+6. When does cert-manager renew a certificate?
+Ans:

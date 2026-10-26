@@ -1,0 +1,244 @@
+==================================================================
+DAY 19 - PART B: LAB
+Install an ingress controller on kind and route by host and path
+Time: 90 minutes
+==================================================================
+
+cd ~/k8s-journey/manifests/week3
+
+
+STEP 1: Recreate the cluster with ingress port mappings
+-------------------------------------------------------
+The ingress controller must be reachable from your machine on ports
+80/443. kind does this with extraPortMappings.
+
+cd ~/k8s-journey/kind
+vi kind-ingress.yaml
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+  extraPortMappings:
+  - containerPort: 80
+    hostPort: 80
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
+- role: worker
+- role: worker
+
+kind delete cluster --name lab
+kind create cluster --name lab --config kind-ingress.yaml
+k get nodes
+
+(If port 80 is busy on your machine, use hostPort: 8080 / 8443 and add
+":8080" to the curl commands below. Podman rootless can't bind ports
+below 1024; use 8080/8443.)
+
+From now on use kind-ingress.yaml as your standard cluster config.
+
+
+STEP 2: Install the NGINX ingress controller (kind flavour)
+-----------------------------------------------------------
+k apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+
+k wait --namespace ingress-nginx --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller --timeout=180s
+
+k get pods,svc -n ingress-nginx
+k get ingressclass
+
+curl localhost          # 404 from nginx = controller is up, no rules yet
+
+
+STEP 3: Deploy two apps
+-----------------------
+vi apps.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apple
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: apple}
+  template:
+    metadata:
+      labels: {app: apple}
+    spec:
+      containers:
+      - name: echo
+        image: hashicorp/http-echo:0.2.3
+        args: ["-listen=:8080", "-text=apple"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apple
+spec:
+  selector: {app: apple}
+  ports:
+  - port: 80
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: banana
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: banana}
+  template:
+    metadata:
+      labels: {app: banana}
+    spec:
+      containers:
+      - name: echo
+        image: hashicorp/http-echo:0.2.3
+        args: ["-listen=:8080", "-text=banana"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: banana
+spec:
+  selector: {app: banana}
+  ports:
+  - port: 80
+    targetPort: 8080
+
+k apply -f apps.yaml
+k get pods,svc
+
+
+STEP 4: Path-based routing
+--------------------------
+vi ingress-path.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fruits-path
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /apple
+        pathType: Prefix
+        backend:
+          service:
+            name: apple
+            port:
+              number: 80
+      - path: /banana
+        pathType: Prefix
+        backend:
+          service:
+            name: banana
+            port:
+              number: 80
+
+k apply -f ingress-path.yaml
+k get ingress
+curl localhost/apple
+curl localhost/banana
+curl localhost/cherry      # 404
+
+
+STEP 5: Host-based routing
+--------------------------
+vi ingress-host.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fruits-host
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: apple.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: apple
+            port:
+              number: 80
+  - host: banana.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: banana
+            port:
+              number: 80
+
+k apply -f ingress-host.yaml
+curl -H "Host: apple.local" localhost
+curl -H "Host: banana.local" localhost
+
+Optional: add to /etc/hosts
+  127.0.0.1 apple.local banana.local
+then: curl apple.local
+
+
+STEP 6: Look inside the controller
+----------------------------------
+CTRL=$(k get pod -n ingress-nginx -l app.kubernetes.io/component=controller -o name)
+k exec -n ingress-nginx $CTRL -- cat /etc/nginx/nginx.conf | grep -A3 "server_name apple.local"
+k logs -n ingress-nginx $CTRL --tail=5
+
+The controller turned your Ingress objects into nginx config.
+Access logs show which Service answered.
+
+
+STEP 7: Default backend and describe
+------------------------------------
+k describe ingress fruits-host
+Note "Default backend" and the rules table with endpoints.
+
+
+STEP 8: Self-signed TLS (preview of Week 8)
+-------------------------------------------
+openssl req -x509 -nodes -days 30 -newkey rsa:2048 \
+  -keyout tls.key -out tls.crt -subj "/CN=apple.local" \
+  -addext "subjectAltName=DNS:apple.local"
+k create secret tls apple-tls --cert=tls.crt --key=tls.key
+
+Add to ingress-host.yaml under spec (same indent as rules):
+  tls:
+  - hosts: [apple.local]
+    secretName: apple-tls
+
+k apply -f ingress-host.yaml
+curl -k --resolve apple.local:443:127.0.0.1 https://apple.local
+curl -kv --resolve apple.local:443:127.0.0.1 https://apple.local 2>&1 | grep subject
+
+
+STEP 9: Break it
+----------------
+a) Change the backend service name to "applee". curl. Read
+   k describe ingress (endpoints error). Fix.
+b) Remove ingressClassName and apply. Does it still work? Why?
+   (Hint: no default IngressClass. Fix it back.)
+
+
+STEP 10: Commit (keep the cluster and apps for tomorrow)
+--------------------------------------------------------
+rm -f tls.key       # never commit private keys
+cd ~/k8s-journey && git add . && git commit -m "day19: ingress"

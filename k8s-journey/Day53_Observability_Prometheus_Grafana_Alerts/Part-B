@@ -1,0 +1,151 @@
+==================================================================
+DAY 53 - PART B: LAB
+kube-prometheus-stack, dashboards, a custom alert, logs with Loki
+Time: 120 minutes
+==================================================================
+
+Resource note: this stack needs ~2-3 GB RAM. If your machine is
+small, recreate kind with a single worker for today.
+
+mkdir -p ~/k8s-journey/week8/observability && cd $_
+
+
+STEP 1: Install
+---------------
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+cat > kps-values.yaml <<EOF
+grafana:
+  adminPassword: admin123
+prometheus:
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 2d
+EOF
+
+helm install mon prometheus-community/kube-prometheus-stack -n monitoring --create-namespace -f kps-values.yaml
+k get pods -n monitoring -w        # wait until all Running
+k get crd | grep monitoring.coreos.com
+
+(The *SelectorNilUsesHelmValues: false settings let Prometheus pick up
+ServiceMonitors and rules from ANY namespace/label.)
+
+
+STEP 2: Prometheus UI
+---------------------
+k port-forward -n monitoring svc/mon-kube-prometheus-stack-prometheus 9090:9090 &
+Open http://localhost:9090 (SSH tunnel if remote: ssh -L 9090:localhost:9090 ...)
+  Status -> Targets: every scrape target and its health
+  Graph, try:
+    up
+    sum by (namespace) (rate(container_cpu_usage_seconds_total[5m]))
+    sum by (namespace) (container_memory_working_set_bytes)
+    kube_pod_container_status_restarts_total > 0
+    kube_deployment_status_replicas_available
+
+
+STEP 3: Grafana
+---------------
+k port-forward -n monitoring svc/mon-grafana 3000:80 &
+Open http://localhost:3000  (admin / admin123)
+Dashboards -> browse:
+  "Kubernetes / Compute Resources / Cluster"
+  "Kubernetes / Compute Resources / Namespace (Pods)"
+  "Node Exporter / Nodes"
+Find your heaviest namespace.
+
+
+STEP 4: Scrape your own app
+---------------------------
+podinfo exposes Prometheus metrics on /metrics:
+k create ns obs-demo
+helm upgrade --install web podinfo/podinfo -n obs-demo --set replicaCount=2 --set serviceMonitor.enabled=true
+k get servicemonitor -n obs-demo
+In Prometheus -> Targets, find obs-demo/web-podinfo (1-2 min).
+
+Generate traffic:
+  k run load -n obs-demo --image=busybox:1.36 -- sh -c 'while true; do wget -qO- web-podinfo:9898 >/dev/null; wget -qO- web-podinfo:9898/status/500 >/dev/null 2>&1; sleep 0.2; done'
+Query:
+  sum by (status) (rate(http_requests_total{namespace="obs-demo"}[1m]))
+
+
+STEP 5: A custom alert
+----------------------
+vi alert-rules.yaml
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: obs-demo-rules
+  namespace: obs-demo
+spec:
+  groups:
+  - name: obs-demo
+    rules:
+    - alert: HighErrorRate
+      expr: |
+        sum(rate(http_requests_total{namespace="obs-demo",status=~"5.."}[2m]))
+          / sum(rate(http_requests_total{namespace="obs-demo"}[2m])) > 0.1
+      for: 1m
+      labels:
+        severity: warning
+      annotations:
+        summary: "More than 10% of requests in obs-demo are failing"
+    - alert: PodCrashLooping
+      expr: increase(kube_pod_container_status_restarts_total{namespace="obs-demo"}[5m]) > 2
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Pod {{ $labels.pod }} is restarting frequently"
+
+k apply -f alert-rules.yaml
+Prometheus -> Alerts: HighErrorRate goes Pending -> Firing (the load
+loop sends ~50% errors).
+
+Trigger the second alert:
+  k run crasher -n obs-demo --image=busybox:1.36 -- sh -c "sleep 5; exit 1"
+
+Alertmanager UI:
+  k port-forward -n monitoring svc/mon-kube-prometheus-stack-alertmanager 9093:9093 &
+  open http://localhost:9093
+(Configure a Slack/email receiver in kps-values.yaml under
+ alertmanager.config for real notifications.)
+
+
+STEP 6: Build a Grafana dashboard
+---------------------------------
+New dashboard -> Add visualization -> Prometheus:
+  Panel 1: sum by (status) (rate(http_requests_total{namespace="obs-demo"}[1m]))
+  Panel 2: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace="obs-demo"}[5m])))
+  Panel 3: sum(container_memory_working_set_bytes{namespace="obs-demo",container!=""}) by (pod)
+Save it. Export as JSON into ~/k8s-journey/week8/observability/.
+
+
+STEP 7: Logs with Loki (optional but recommended)
+-------------------------------------------------
+helm repo add grafana https://grafana.github.io/helm-charts && helm repo update
+helm install loki grafana/loki -n monitoring --set deploymentMode=SingleBinary \
+  --set loki.commonConfig.replication_factor=1 --set loki.storage.type=filesystem \
+  --set singleBinary.replicas=1 --set loki.auth_enabled=false \
+  --set loki.useTestSchema=true \
+  --set read.replicas=0 --set write.replicas=0 --set backend.replicas=0 \
+  --set chunksCache.enabled=false --set resultsCache.enabled=false
+(Chart options change between versions; check the Loki Helm docs if
+ the install complains.)
+Install a log collector (Grafana Alloy or Promtail/Fluent Bit) pointed
+at http://loki-gateway.monitoring/loki/api/v1/push, add Loki as a
+Grafana data source, then in Explore run:
+  {namespace="obs-demo"} |= "error"
+
+
+STEP 8: Clean up and commit
+---------------------------
+kill %1 %2 %3 2>/dev/null
+k delete ns obs-demo
+(keep the monitoring stack if your machine can handle it; the
+ capstone uses it. Otherwise: helm uninstall mon -n monitoring)
+cd ~/k8s-journey && git add . && git commit -m "day53: observability"

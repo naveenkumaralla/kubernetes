@@ -1,0 +1,111 @@
+==================================================================
+DAY 33 - PART A: THEORY
+RBAC: Roles, ClusterRoles, Bindings, ServiceAccounts
+Time: 45 minutes
+==================================================================
+
+1. AUTHENTICATION vs AUTHORIZATION
+----------------------------------
+Authentication (authn): WHO are you?
+  - users: client certificates, OIDC tokens (company SSO), cloud IAM
+    (EKS/AKS/GKE). Kubernetes has NO "User" object; a user is just a
+    name inside a certificate or token.
+  - ServiceAccounts: identities for PODS (and automation). These ARE
+    Kubernetes objects, namespaced.
+  - groups: e.g. system:masters, system:authenticated, your OIDC groups
+
+Authorization (authz): WHAT can you do? -> RBAC.
+
+
+2. RBAC = 4 OBJECTS
+-------------------
+  Role                permissions inside ONE namespace
+  ClusterRole         permissions cluster-wide (or reusable template)
+  RoleBinding         grants a Role/ClusterRole to subjects IN a namespace
+  ClusterRoleBinding  grants a ClusterRole across the whole cluster
+
+  WHO (subject)  --binding-->  WHAT (role: verbs on resources)
+
+
+3. A ROLE
+---------
+  apiVersion: rbac.authorization.k8s.io/v1
+  kind: Role
+  metadata:
+    name: pod-reader
+    namespace: dev
+  rules:
+  - apiGroups: [""]               # "" = core group (pods, services ...)
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
+
+Verbs: get, list, watch, create, update, patch, delete, deletecollection
+Plus special ones: "pods/exec" (create), "pods/portforward", impersonate.
+Find apiGroups with: k api-resources
+
+
+4. A ROLEBINDING
+----------------
+  kind: RoleBinding
+  metadata:
+    name: read-pods
+    namespace: dev
+  subjects:
+  - kind: User
+    name: alice
+    apiGroup: rbac.authorization.k8s.io
+  - kind: ServiceAccount
+    name: viewer
+    namespace: dev
+  roleRef:
+    kind: Role
+    name: pod-reader
+    apiGroup: rbac.authorization.k8s.io
+
+roleRef can't be changed after creation (delete + recreate).
+
+
+5. BUILT-IN CLUSTERROLES
+------------------------
+  cluster-admin   everything
+  admin           full control within a namespace (via RoleBinding)
+  edit            read/write most objects, no RBAC changes
+  view            read-only (no Secrets)
+Bind "edit" to a team in their namespace with one RoleBinding.
+
+
+6. SERVICEACCOUNTS
+------------------
+Every namespace has a "default" SA. Every pod runs as an SA; its token
+is mounted at
+  /var/run/secrets/kubernetes.io/serviceaccount/token
+Short-lived, auto-rotated (projected token). An app (CI tool, operator,
+your own controller) uses it to call the API.
+
+Good practice:
+  - one SA per app; grant least privilege
+  - automountServiceAccountToken: false for pods that don't need the API
+  - never bind cluster-admin to an app SA
+  - in clouds, SAs also map to cloud IAM roles (Week 7)
+
+SA full name in RBAC/auth checks:
+  system:serviceaccount:<namespace>:<name>
+
+
+7. TESTING PERMISSIONS
+----------------------
+  k auth can-i create deployments -n dev
+  k auth can-i list pods -n dev --as=alice
+  k auth can-i '*' '*' --as=system:serviceaccount:dev:viewer
+  k auth can-i --list --as=alice -n dev
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Authn = who; RBAC = what.
+- Role/ClusterRole = permissions; (Cluster)RoleBinding = who gets them.
+- RBAC is additive only: no "deny" rules.
+- ServiceAccounts are pod identities; least privilege.

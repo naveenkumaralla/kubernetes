@@ -1,0 +1,22 @@
+==================================================================
+DAY 60 - PART C: CHECKPOINT
+==================================================================
+
+1. What does the controller plugin do vs the node plugin?
+Ans:
+
+
+2. Name four CSI sidecars and their jobs.
+Ans:
+
+
+3. What are CSIDriver and CSINode objects for?
+Ans:
+
+
+4. Why could 4 pods on 2 nodes share the NFS PVC but not an EBS PVC?
+Ans:
+
+
+5. Describe the lifecycle from PVC creation to a mounted volume.
+Ans:

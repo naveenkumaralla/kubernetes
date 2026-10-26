@@ -1,0 +1,30 @@
+==================================================================
+DAY 10 - PART C: CHECKPOINT
+==================================================================
+
+1. What are the three key parts of a ReplicaSet spec?
+Ans:
+
+
+2. What happens if the template labels don't match the selector?
+Ans:
+
+
+3. Labels vs annotations: what is the difference?
+Ans:
+
+
+4. Why did the ReplicaSet create a new pod when you relabelled one?
+Ans:
+
+
+5. Why did changing the image in the ReplicaSet not update the pods?
+Ans:
+
+
+6. Write a selector that matches pods where env is dev or test.
+Ans:
+
+
+7. How do you find which controller owns a pod?
+Ans:

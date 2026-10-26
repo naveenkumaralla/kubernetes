@@ -1,0 +1,30 @@
+==================================================================
+DAY 8 - PART C: CHECKPOINT
+==================================================================
+
+1. Name the four top-level fields of every Kubernetes object.
+Ans:
+
+
+2. Imperative vs declarative: explain with one example each.
+Ans:
+
+
+3. What does --dry-run=client -o yaml do and why is it useful?
+Ans:
+
+
+4. How do you find the correct apiVersion for a Deployment?
+Ans:
+
+
+5. What is the difference between "k create -f" and "k apply -f"?
+Ans:
+
+
+6. Why did adding a port to a running pod fail?
+Ans:
+
+
+7. What does "k explain pod.spec.containers.env" show you?
+Ans:

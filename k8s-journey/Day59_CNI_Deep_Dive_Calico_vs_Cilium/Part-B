@@ -1,0 +1,194 @@
+==================================================================
+DAY 59 - PART B: LAB
+Global deny with Calico, L7 policy and Hubble with Cilium
+Time: 120 minutes
+==================================================================
+
+PART 1: CALICO
+==============
+Use the calico cluster from Days 20/34 (recreate if deleted).
+kubectx kind-calico
+
+
+STEP 1: Calico CLI
+------------------
+Calico resources can be managed with kubectl (projectcalico.org/v3 via
+the API server the operator installs) or with calicoctl.
+k get tigerastatus
+k api-resources | grep projectcalico.org
+
+
+STEP 2: A cluster-wide default deny that skips system namespaces
+----------------------------------------------------------------
+mkdir -p ~/k8s-journey/week9/cni && cd $_
+vi calico-global.yaml
+
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: default-deny-apps
+spec:
+  namespaceSelector: has(projectcalico.org/name) && projectcalico.org/name not in {"kube-system", "calico-system", "calico-apiserver", "tigera-operator"}
+  types:
+  - Ingress
+  - Egress
+  egress:
+  - action: Allow
+    protocol: UDP
+    destination:
+      selector: k8s-app == "kube-dns"
+      ports: [53]
+  - action: Allow
+    protocol: TCP
+    destination:
+      selector: k8s-app == "kube-dns"
+      ports: [53]
+
+k apply -f calico-global.yaml
+k create ns t1
+k run a -n t1 --image=nginx:1.27 --labels=app=a --expose --port=80
+k run b -n t1 --image=busybox:1.36 --labels=app=b -- sleep 3600
+k exec -n t1 b -- wget -qO- -T 2 a     # blocked (by the GLOBAL policy)
+k exec -n t1 b -- nslookup a           # DNS allowed
+
+Then allow b -> a with a normal Kubernetes NetworkPolicy (ingress on
+a from app=b) PLUS an egress rule for b, and test again.
+Note: Calico policies have an "order" field; lower order is evaluated
+first, and "action: Deny" exists, unlike Kubernetes NetworkPolicy.
+
+k delete ns t1 ; k delete -f calico-global.yaml
+
+
+PART 2: CILIUM
+==============
+
+STEP 3: A Cilium cluster
+------------------------
+cd ~/k8s-journey/kind
+cat > kind-cilium.yaml <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true
+nodes:
+- role: control-plane
+- role: worker
+- role: worker
+EOF
+kind create cluster --name cilium --config kind-cilium.yaml
+
+Install the cilium CLI (Day 20 Step 7) if needed, then:
+cilium install
+cilium status --wait
+cilium hubble enable --ui
+cilium status
+
+
+STEP 4: Hubble CLI
+------------------
+Download the hubble CLI for Linux amd64 from
+https://github.com/cilium/hubble/releases (latest), install it:
+  tar xzf hubble-linux-amd64.tar.gz && sudo install hubble /usr/local/bin/
+cilium hubble port-forward &
+hubble status
+
+
+STEP 5: App + L7 policy
+-----------------------
+cd ~/k8s-journey/week9/cni
+k create ns l7
+k create deploy httpbin -n l7 --image=mccutchen/go-httpbin --port=8080
+k expose deploy httpbin -n l7 --port=8080
+k run client -n l7 --image=nicolaka/netshoot --labels=app=client -- sleep infinity
+k run other  -n l7 --image=nicolaka/netshoot --labels=app=other  -- sleep infinity
+k wait -n l7 --for=condition=ready pod --all --timeout=120s
+
+k exec -n l7 client -- curl -s -o /dev/null -w "%{http_code}\n" httpbin:8080/get
+k exec -n l7 client -- curl -s -o /dev/null -w "%{http_code}\n" -X POST httpbin:8080/post
+
+vi cilium-l7.yaml
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: httpbin-l7
+  namespace: l7
+spec:
+  endpointSelector:
+    matchLabels:
+      app: httpbin
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        app: client
+    toPorts:
+    - ports:
+      - port: "8080"
+        protocol: TCP
+      rules:
+        http:
+        - method: GET
+          path: "/get"
+        - method: GET
+          path: "/headers"
+
+k apply -f cilium-l7.yaml
+k exec -n l7 client -- curl -s -o /dev/null -w "%{http_code}\n" httpbin:8080/get            # 200
+k exec -n l7 client -- curl -s -o /dev/null -w "%{http_code}\n" -X POST httpbin:8080/post   # 403 (L7 denied)
+k exec -n l7 client -- curl -s -o /dev/null -w "%{http_code}\n" httpbin:8080/status/200     # 403
+k exec -n l7 other  -- curl -s -m 3 -o /dev/null -w "%{http_code}\n" httpbin:8080/get       # 000 (L3 dropped)
+
+Note the difference: L7 denials return HTTP 403 from the Envoy proxy;
+L3/L4 denials are silent drops (timeout).
+
+
+STEP 6: Observe with Hubble
+---------------------------
+hubble observe -n l7 --last 30
+hubble observe -n l7 --verdict DROPPED
+hubble observe -n l7 --protocol http
+cilium hubble ui         # opens the service map UI (port-forward)
+
+
+STEP 7: DNS-aware egress (FQDN)
+-------------------------------
+vi cilium-fqdn.yaml
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: client-egress
+  namespace: l7
+spec:
+  endpointSelector:
+    matchLabels:
+      app: client
+  egress:
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: kube-system
+        k8s-app: kube-dns
+    toPorts:
+    - ports:
+      - port: "53"
+        protocol: ANY
+      rules:
+        dns:
+        - matchPattern: "*"
+  - toFQDNs:
+    - matchName: "example.com"
+  - toEndpoints:
+    - matchLabels:
+        app: httpbin
+
+k apply -f cilium-fqdn.yaml
+k exec -n l7 client -- curl -s -m 5 -o /dev/null -w "%{http_code}\n" https://example.com     # allowed
+k exec -n l7 client -- curl -s -m 5 -o /dev/null -w "%{http_code}\n" https://kubernetes.io   # blocked
+hubble observe -n l7 --type drop --last 10
+
+
+STEP 8: Clean up and commit
+---------------------------
+kind delete cluster --name cilium
+kubectx kind-lab
+cd ~/k8s-journey && git add . && git commit -m "day59: calico vs cilium"

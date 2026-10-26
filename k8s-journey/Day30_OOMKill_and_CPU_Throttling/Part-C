@@ -1,0 +1,27 @@
+==================================================================
+DAY 30 - PART C: CHECKPOINT
+==================================================================
+
+1. Exit code 137 with reason OOMKilled: what happened exactly?
+Ans:
+
+
+2. OOMKilled vs Evicted: what is the difference?
+Ans:
+
+
+3. How do you prove a container is being CPU throttled?
+Ans:
+
+
+4. Why might a team decide not to set CPU limits?
+Ans:
+
+
+5. What was the response time of the calc app with and without the
+   CPU limit?
+Ans:
+
+
+6. Describe a process to right-size requests and limits.
+Ans:

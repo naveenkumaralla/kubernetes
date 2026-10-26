@@ -1,0 +1,128 @@
+==================================================================
+DAY 17 - PART B: LAB
+Resolve names inside the cluster
+Time: 75-90 minutes
+==================================================================
+
+cd ~/k8s-journey/manifests/week3
+
+
+STEP 1: Find CoreDNS
+--------------------
+k get deploy,svc -n kube-system -l k8s-app=kube-dns
+k get pods -n kube-system -l k8s-app=kube-dns -o wide
+k get cm coredns -n kube-system -o yaml
+
+Read the Corefile: "kubernetes cluster.local ...", "forward .
+/etc/resolv.conf", "cache 30".
+
+
+STEP 2: Set up two namespaces
+-----------------------------
+k create ns shop
+k apply -f backend.yaml -f backend-svc.yaml -n shop
+k create ns frontend
+k run tool -n frontend --image=nicolaka/netshoot -- sleep infinity
+k get pods -n shop
+k get pods -n frontend
+
+
+STEP 3: Look at resolv.conf
+---------------------------
+k exec -n frontend tool -- cat /etc/resolv.conf
+
+Note nameserver = kube-dns ClusterIP, and the search list starts with
+"frontend.svc.cluster.local".
+
+
+STEP 4: Short, medium, and full names
+-------------------------------------
+k exec -n frontend tool -- nslookup backend
+   -> fails: there is no "backend" in namespace frontend
+k exec -n frontend tool -- nslookup backend.shop
+   -> works
+k exec -n frontend tool -- nslookup backend.shop.svc.cluster.local
+   -> works
+k exec -n frontend tool -- curl -s backend.shop
+
+
+STEP 5: Watch the search-domain lookups
+---------------------------------------
+k exec -n frontend tool -- dig +search +showsearch backend.shop
+
+You see each try: backend.shop.frontend.svc.cluster.local (NXDOMAIN),
+backend.shop.svc.cluster.local (answer).
+
+k exec -n frontend tool -- dig +search +showsearch kubernetes.io
+Count the failed tries before the real lookup (ndots:5 effect).
+
+k exec -n frontend tool -- dig kubernetes.io.     (trailing dot = 1 lookup)
+
+
+STEP 6: SRV records and headless
+--------------------------------
+k exec -n frontend tool -- dig +short SRV _http._tcp.backend.shop.svc.cluster.local
+k apply -f backend-headless.yaml -n shop
+k exec -n frontend tool -- dig +short backend-headless.shop.svc.cluster.local
+
+
+STEP 7: Pod DNS records
+-----------------------
+A pod with IP 10.244.1.5 in namespace shop also has:
+  10-244-1-5.shop.pod.cluster.local
+POD_IP=$(k get pod -n shop -l app=backend -o jsonpath='{.items[0].status.podIP}')
+k exec -n frontend tool -- nslookup $(echo $POD_IP | tr . -).shop.pod.cluster.local
+
+
+STEP 8: CoreDNS logs (enable query logging)
+-------------------------------------------
+k edit cm coredns -n kube-system
+  Add a line "log" inside the ".:53 {" block (e.g. under "errors").
+k rollout restart deploy coredns -n kube-system
+k exec -n frontend tool -- nslookup backend.shop
+k logs -n kube-system -l k8s-app=kube-dns --tail=10
+
+Remove the "log" line afterwards and restart again (logging every
+query is noisy).
+
+
+STEP 9: Break DNS and fix it
+----------------------------
+k scale deploy coredns -n kube-system --replicas=0
+k exec -n frontend tool -- nslookup -timeout=2 backend.shop      # times out
+k exec -n frontend tool -- curl -s -m 3 backend.shop              # fails
+k exec -n frontend tool -- curl -s -m 3 $(k get svc backend -n shop -o jsonpath='{.spec.clusterIP}')
+   -> works by IP: the Service is fine, only DNS is broken
+
+Fix:
+  k scale deploy coredns -n kube-system --replicas=2
+
+
+STEP 10: Custom dnsConfig
+-------------------------
+vi pod-dnsconfig.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lowndots
+  namespace: frontend
+spec:
+  dnsConfig:
+    options:
+    - name: ndots
+      value: "1"
+  containers:
+  - name: tool
+    image: nicolaka/netshoot
+    command: ["sleep", "infinity"]
+
+k apply -f pod-dnsconfig.yaml
+k exec -n frontend lowndots -- cat /etc/resolv.conf
+k exec -n frontend lowndots -- dig +search +showsearch kubernetes.io
+
+
+STEP 11: Clean up and commit
+----------------------------
+k delete ns shop frontend
+cd ~/k8s-journey && git add . && git commit -m "day17: dns"

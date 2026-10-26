@@ -1,0 +1,233 @@
+==================================================================
+DAY 32 - PART B: LAB
+Control where pods run
+Time: 90 minutes
+==================================================================
+
+cd ~/k8s-journey/manifests/week5
+
+
+STEP 1: Node labels
+-------------------
+k get nodes --show-labels
+k label node lab-worker disktype=ssd zone=a
+k label node lab-worker2 disktype=hdd zone=b
+k get nodes -L disktype,zone
+
+
+STEP 2: nodeSelector
+--------------------
+k create deploy ssd-app --image=nginx:1.27 --replicas=3 --dry-run=client -o yaml > ssd-app.yaml
+Add under template.spec:
+      nodeSelector:
+        disktype: ssd
+k apply -f ssd-app.yaml
+k get pods -l app=ssd-app -o wide        # all on lab-worker
+
+Use a label no node has (disktype: nvme), apply, read the Pending
+reason, then restore.
+
+
+STEP 3: Node affinity (hard + soft)
+-----------------------------------
+vi affinity.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aff
+spec:
+  replicas: 4
+  selector:
+    matchLabels: {app: aff}
+  template:
+    metadata:
+      labels: {app: aff}
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: disktype
+                operator: In
+                values: [ssd, hdd]
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: zone
+                operator: In
+                values: [b]
+      containers:
+      - name: c
+        image: nginx:1.27
+        resources:
+          requests: {cpu: 50m}
+
+k apply -f affinity.yaml
+k get pods -l app=aff -o wide       # mostly/all on lab-worker2 (zone b preferred)
+
+
+STEP 4: Pod anti-affinity: spread replicas
+------------------------------------------
+vi anti.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ha-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: ha-web}
+  template:
+    metadata:
+      labels: {app: ha-web}
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels: {app: ha-web}
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: c
+        image: nginx:1.27
+
+k apply -f anti.yaml
+k get pods -l app=ha-web -o wide     # one per worker
+k scale deploy ha-web --replicas=3
+k get pods -l app=ha-web             # third is Pending (only 2 workers)
+k describe pod $(k get pods -l app=ha-web --field-selector=status.phase=Pending -o name) | tail -2
+
+Change "required..." to a preferred rule (needs weight and
+podAffinityTerm), or use topologySpreadConstraints:
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels: {app: ha-web}
+Remove the affinity block, add this, scale to 6, check the spread.
+
+
+STEP 5: Taints and tolerations
+------------------------------
+k taint node lab-worker2 dedicated=gpu:NoSchedule
+k describe node lab-worker2 | grep Taints
+
+k create deploy normal --image=nginx:1.27 --replicas=4
+k get pods -l app=normal -o wide     # none on lab-worker2
+
+vi gpu-job.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: gpu-app}
+  template:
+    metadata:
+      labels: {app: gpu-app}
+    spec:
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gpu
+        effect: NoSchedule
+      nodeSelector:
+        kubernetes.io/hostname: lab-worker2
+      containers:
+      - name: c
+        image: nginx:1.27
+
+k apply -f gpu-job.yaml
+k get pods -l app=gpu-app -o wide    # on lab-worker2
+
+Remove the nodeSelector and re-apply with more replicas: the pods can
+go anywhere (toleration permits, doesn't attract).
+
+
+STEP 6: NoExecute evicts running pods
+-------------------------------------
+k get pods -o wide | grep lab-worker
+k taint node lab-worker maintenance=true:NoExecute
+k get pods -o wide -w        # pods on lab-worker are evicted and
+                             # rescheduled (if they can fit elsewhere)
+k taint node lab-worker maintenance=true:NoExecute-
+k taint node lab-worker2 dedicated=gpu:NoSchedule-
+
+
+STEP 7: Control-plane taint
+---------------------------
+k describe node lab-control-plane | grep Taints
+k get pods -A -o wide | grep control-plane      # only system pods
+
+
+STEP 8: DaemonSet
+-----------------
+vi ds-agent.yaml
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-agent
+spec:
+  selector:
+    matchLabels: {app: node-agent}
+  template:
+    metadata:
+      labels: {app: node-agent}
+    spec:
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      containers:
+      - name: agent
+        image: busybox:1.36
+        command: ["sh", "-c", "while true; do echo \"agent on $NODE_NAME: $(cat /host/proc/loadavg)\"; sleep 10; done"]
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        volumeMounts:
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+      volumes:
+      - name: proc
+        hostPath:
+          path: /proc
+
+k apply -f ds-agent.yaml
+k get ds node-agent
+k get pods -l app=node-agent -o wide       # one per node, incl. control plane
+k logs -l app=node-agent --prefix
+
+k get ds -n kube-system                    # kube-proxy, kindnet are DaemonSets too
+
+
+STEP 9: Cordon, drain, PodDisruptionBudget
+------------------------------------------
+k create pdb normal-pdb --selector=app=normal --min-available=3
+k cordon lab-worker
+k get nodes                                # SchedulingDisabled
+k drain lab-worker --ignore-daemonsets --delete-emptydir-data
+k get pods -o wide                         # moved to lab-worker2
+k uncordon lab-worker
+
+Drain respects the PDB: it waits rather than taking "normal" below 3.
+
+
+STEP 10: Clean up and commit
+----------------------------
+k delete deploy ssd-app aff ha-web normal gpu-app
+k delete ds node-agent ; k delete pdb normal-pdb
+k label node lab-worker disktype- zone- ; k label node lab-worker2 disktype- zone-
+cd ~/k8s-journey && git add . && git commit -m "day32: scheduling"

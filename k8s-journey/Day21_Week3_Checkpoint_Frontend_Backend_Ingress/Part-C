@@ -1,0 +1,32 @@
+==================================================================
+DAY 21 - PART C: WEEK 3 SELF-TEST
+==================================================================
+
+1. Draw the full path of a request to shop.local/api.
+Ans:
+
+
+2. Fault 1 (wrong targetPort): symptom, how you found it, fix.
+Ans:
+
+
+3. Fault 2 (wrong selector): symptom, how you found it, fix.
+Ans:
+
+
+4. Fault 3 (wrong host): symptom, how you found it, fix.
+Ans:
+
+
+5. Why did proxy_pass use api.shop.svc.cluster.local instead of a pod
+   IP?
+Ans:
+
+
+6. Which Service type would you use in the cloud in front of the
+   ingress controller?
+Ans:
+
+
+7. Mistakes log: one networking error from this week and its fix.
+Ans:

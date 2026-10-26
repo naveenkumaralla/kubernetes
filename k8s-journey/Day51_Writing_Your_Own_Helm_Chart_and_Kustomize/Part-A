@@ -1,0 +1,79 @@
+==================================================================
+DAY 51 - PART A: THEORY
+Writing Your Own Chart, and Kustomize as an Alternative
+Time: 45 minutes
+==================================================================
+
+1. HELM TEMPLATE BASICS
+-----------------------
+  {{ .Values.replicaCount }}          value from values.yaml
+  {{ .Release.Name }}                 release name
+  {{ .Chart.Name }} {{ .Chart.AppVersion }}
+  {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+  {{- ... }} / {{ ... -}}             trim whitespace
+  {{ include "mychart.fullname" . }}  call a helper from _helpers.tpl
+  {{ toYaml .Values.resources | nindent 12 }}   insert a YAML block
+  {{- if .Values.ingress.enabled }} ... {{- end }}
+  {{- range .Values.env }} ... {{- end }}
+  {{ .Values.name | quote }}  {{ required "image.repository is required" .Values.image.repository }}
+
+Config-change rollouts (Day 22 problem solved):
+  annotations:
+    checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+
+Test and lint:
+  helm lint ./mychart
+  helm template x ./mychart -f values-prod.yaml
+  helm install x ./mychart --dry-run=server
+
+
+2. KUSTOMIZE
+------------
+Built into kubectl (k apply -k). NO templates: plain YAML + patches.
+  base/
+    kustomization.yaml   resources: [deployment.yaml, service.yaml]
+    deployment.yaml
+    service.yaml
+  overlays/
+    dev/kustomization.yaml    resources: [../../base] + patches
+    prod/kustomization.yaml
+
+Common fields:
+  namespace: prod
+  namePrefix: prod-
+  labels: [...] / commonLabels
+  images:                         # change image tag without editing YAML
+  - name: myapp
+    newName: docker.io/me/myapp
+    newTag: v5
+  replicas:
+  - name: myapp
+    count: 4
+  configMapGenerator:             # generates ConfigMap with hash suffix
+  - name: app-config              # -> name changes when content changes
+    literals: [LOG_LEVEL=info]    # -> automatic rollout!
+  patches:
+  - path: patch-resources.yaml
+
+  k kustomize overlays/prod      render
+  k apply -k overlays/prod       apply
+
+
+3. HELM vs KUSTOMIZE
+--------------------
+                 Helm                           Kustomize
+  Style          templates + values             overlays + patches
+  Packaging      versioned charts, repos        just folders in Git
+  Lifecycle      releases, history, rollback    plain apply (GitOps)
+  Best for       distributing software,         your own apps, small
+                 many config knobs              env differences
+Many teams: Helm for third-party software, Kustomize (or Helm) for
+their own apps. Argo CD supports both (Day 54).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Helm: values + templates; lint, template, dry-run.
+- Kustomize: base + overlays; images and configMapGenerator are the
+  most useful features.
+- Both render to plain YAML.

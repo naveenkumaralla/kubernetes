@@ -1,0 +1,28 @@
+==================================================================
+DAY 44 - PART C: CHECKPOINT
+==================================================================
+
+1. Which two CloudFormation stacks did eksctl create, and what's in
+   each?
+Ans:
+
+
+2. Why don't you see kube-apiserver or etcd pods?
+Ans:
+
+
+3. Where did pod IPs come from? How many pods fit on a t3.medium?
+Ans:
+
+
+4. How does kubectl authenticate to EKS?
+Ans:
+
+
+5. How long did cluster creation take? Deletion?
+Ans:
+
+
+6. What did you check to be sure nothing was left running (and
+   costing money)?
+Ans:

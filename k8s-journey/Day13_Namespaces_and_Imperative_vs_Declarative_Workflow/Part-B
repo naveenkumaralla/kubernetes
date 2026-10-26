@@ -1,0 +1,144 @@
+==================================================================
+DAY 13 - PART B: LAB
+Same app in dev and prod
+Time: 75-90 minutes
+==================================================================
+
+STEP 1: Explore built-in namespaces
+-----------------------------------
+k get ns
+k get all -n kube-system
+k get lease -n kube-node-lease
+k api-resources --namespaced=false | head -20
+
+
+STEP 2: Create namespaces declaratively
+---------------------------------------
+mkdir -p ~/k8s-journey/manifests/week2/webapp/{base,dev,prod}
+cd ~/k8s-journey/manifests/week2/webapp
+
+vi dev/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    env: dev
+
+vi prod/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+  labels:
+    env: prod
+
+k apply -f dev/namespace.yaml -f prod/namespace.yaml
+k get ns --show-labels
+
+
+STEP 3: One base Deployment, two environments
+---------------------------------------------
+vi base/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: YOURUSER/myapp:v1
+        ports:
+        - containerPort: 5000
+
+Note: no namespace in the file. Choose it at apply time:
+  k apply -f base/deployment.yaml -n dev
+  k apply -f base/deployment.yaml -n prod
+  k get deploy -A | grep web
+
+Same name, two namespaces, no conflict.
+
+
+STEP 4: Make prod different
+---------------------------
+Scale prod only:
+  k scale deploy web -n prod --replicas=4
+  k get pods -n dev
+  k get pods -n prod
+
+(Here we used an imperative command. Notice the problem: base/ no
+longer describes prod. In Week 8, Kustomize overlays will fix this
+properly. For now copy the file:)
+  cp base/deployment.yaml prod/deployment.yaml
+  sed -i 's/replicas: 2/replicas: 4/' prod/deployment.yaml
+  k apply -f prod/deployment.yaml -n prod
+  k diff -f prod/deployment.yaml -n prod      # no diff = in sync
+
+
+STEP 5: Switch default namespace
+--------------------------------
+kubens dev
+k get pods              # dev pods, no -n needed
+kubens prod
+k get pods
+kubens default
+
+Without kubens:
+  k config set-context --current --namespace=dev
+  k config view --minify | grep namespace
+  k config set-context --current --namespace=default
+
+
+STEP 6: Cross-namespace access
+------------------------------
+k expose deploy web -n prod --port=80 --target-port=5000
+k run tmp -n dev --rm -it --image=busybox:1.36 -- sh
+  wget -qO- web.prod          # works: namespaces don't block traffic
+  wget -qO- web               # fails: no "web" Service in dev
+  exit
+
+
+STEP 7: Imperative vs declarative race
+--------------------------------------
+Time yourself:
+  a) Imperative: create a deployment "api" with image nginx:1.27,
+     3 replicas, in namespace dev, then expose it on port 80.
+       k create deploy api --image=nginx:1.27 --replicas=3 -n dev
+       k expose deploy api --port=80 -n dev
+  b) Declarative: generate both as YAML into dev/api.yaml (use
+     --dry-run=client -o yaml, separate with ---), delete the
+     imperative ones, and apply the file.
+       k delete deploy,svc api -n dev
+       k create deploy api --image=nginx:1.27 --replicas=3 -n dev --dry-run=client -o yaml > dev/api.yaml
+       echo "---" >> dev/api.yaml
+       k create service clusterip api --tcp=80:80 -n dev --dry-run=client -o yaml >> dev/api.yaml
+       k apply -f dev/api.yaml
+
+Then run "k apply -f dev/api.yaml" again: "unchanged". That is
+idempotency.
+
+
+STEP 8: Delete a namespace (and everything in it)
+-------------------------------------------------
+k get all -n dev
+k delete ns dev
+k get all -n dev           # gone
+
+Recreate it from your files in one command:
+  k apply -f dev/namespace.yaml && k apply -f base/deployment.yaml -n dev && k apply -f dev/api.yaml
+
+
+STEP 9: Clean up and commit
+---------------------------
+k delete ns dev prod
+cd ~/k8s-journey && git add . && git commit -m "day13: namespaces"

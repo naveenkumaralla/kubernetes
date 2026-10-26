@@ -1,0 +1,138 @@
+==================================================================
+DAY 55 - PART B: LAB
+GitHub Actions -> Docker Hub -> Git -> Argo CD
+Time: 120 minutes
+==================================================================
+
+STEP 1: Prepare secrets in GitHub
+---------------------------------
+Docker Hub: Account settings -> Personal access tokens -> new token
+(Read & Write).
+GitHub repo -> Settings -> Secrets and variables -> Actions:
+  DOCKERHUB_USERNAME = YOURUSER
+  DOCKERHUB_TOKEN    = <token>
+Repo -> Settings -> Actions -> General -> Workflow permissions ->
+"Read and write permissions" (so the workflow can push the tag commit).
+
+
+STEP 2: A simple test for your app
+----------------------------------
+cd ~/k8s-journey/myapp
+vi test_app.py
+
+def test_routes_exist():
+    src = open("app.py").read()
+    assert "Flask" in src
+    assert "/healthz" in src and "/ready" in src
+
+(Simple, but proves the pipeline can fail on a test.)
+
+
+STEP 3: The workflow
+--------------------
+mkdir -p ~/k8s-journey/.github/workflows
+vi ~/k8s-journey/.github/workflows/myapp.yaml
+
+name: myapp-ci
+on:
+  push:
+    branches: [main]
+    paths: ["myapp/**"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Test
+      working-directory: myapp
+      run: |
+        pip install pytest flask
+        pytest -q
+
+    - name: Set image tag
+      run: echo "TAG=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+    - uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - uses: docker/build-push-action@v6
+      with:
+        context: myapp
+        file: myapp/Containerfile
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/myapp:${{ env.TAG }}
+
+    - name: Update dev overlay
+      run: |
+        curl -sL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+        cd week8/kustomize/overlays/dev
+        ../../../../kustomize edit set image myapp=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/myapp:${{ env.TAG }}
+        cd -
+        git config user.name "github-actions"
+        git config user.email "github-actions@users.noreply.github.com"
+        git add week8/kustomize/overlays/dev/kustomization.yaml
+        git commit -m "deploy myapp ${{ env.TAG }} to dev [skip ci]"
+        git push
+
+(If your Dockerfile is named "Dockerfile", change the "file:" line.
+The kustomize binary is downloaded into the repo root, hence the
+relative path ../../../../kustomize.)
+
+git add . && git commit -m "ci: build and deploy myapp" && git push
+
+
+STEP 4: Trigger it
+------------------
+Change the message in myapp/app.py (e.g. "v5 via CI"), commit, push.
+GitHub -> Actions: watch the run. Then:
+  git pull                      # the bot's commit with the new tag
+  grep -A2 newTag week8/kustomize/overlays/dev/kustomization.yaml
+  argocd app get myapp-dev      # OutOfSync -> Synced
+  k get pods -n kz-dev -o jsonpath='{.items[*].spec.containers[0].image}{"\n"}'
+  k port-forward -n kz-dev svc/myapp 5000:80 &
+  curl localhost:5000 ; kill %1
+
+
+STEP 5: Break the pipeline on purpose
+-------------------------------------
+Remove the /ready route from app.py, push. The Test step fails, no
+image is built, nothing is deployed. Restore it.
+
+
+STEP 6: Promotion to prod by pull request
+-----------------------------------------
+Create an Argo CD Application myapp-prod for overlays/prod (copy
+app-dev.yaml). To promote:
+  git checkout -b promote-<sha>
+  edit overlays/prod/kustomization.yaml newTag to the dev SHA
+  git commit -am "promote <sha> to prod" && git push -u origin HEAD
+Open a PR, review the diff, merge -> Argo CD deploys prod.
+
+
+STEP 7 (OPTIONAL): Scan the image in CI
+---------------------------------------
+Add before the push step:
+    - uses: aquasecurity/trivy-action@0.28.0
+      with:
+        image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/myapp:${{ env.TAG }}
+        severity: CRITICAL,HIGH
+        exit-code: "1"
+(This needs the image built first: build with push: false + load:
+true, scan, then push. Check the trivy-action README for the current
+version.)
+
+
+STEP 8: Commit
+--------------
+cd ~/k8s-journey && git pull && git add . && git commit -m "day55: ci/cd" && git push

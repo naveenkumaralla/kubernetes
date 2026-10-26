@@ -1,0 +1,67 @@
+==================================================================
+DAY 53 - PART A: THEORY
+Observability: Metrics, Logs, Alerts
+Time: 45 minutes
+==================================================================
+
+1. THE THREE PILLARS
+--------------------
+  Metrics  numbers over time (CPU, requests/s, error rate, latency)
+           -> Prometheus, Grafana; cloud: CloudWatch, Azure Monitor,
+              Google Cloud Monitoring, managed Prometheus
+  Logs     text events from apps and components
+           -> Fluent Bit/Vector/Alloy -> Loki, Elasticsearch/OpenSearch,
+              CloudWatch Logs
+  Traces   the path of one request across services
+           -> OpenTelemetry -> Tempo, Jaeger, X-Ray
+OpenTelemetry (OTel) is the standard for instrumenting all three.
+
+
+2. PROMETHEUS IN 5 MINUTES
+--------------------------
+- PULL model: Prometheus scrapes http://target:port/metrics every N s.
+- Time series: metric name + labels, e.g.
+    http_requests_total{method="GET", code="200", pod="web-1"}
+- Types: counter (only goes up), gauge (up/down), histogram, summary.
+- PromQL examples:
+    rate(http_requests_total[5m])                       per-second rate
+    sum by (namespace) (rate(container_cpu_usage_seconds_total[5m]))
+    container_memory_working_set_bytes{namespace="prod"}
+    kube_deployment_status_replicas_available
+    histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+- Alerting rules -> Alertmanager -> Slack/email/PagerDuty.
+
+
+3. WHERE KUBERNETES METRICS COME FROM
+-------------------------------------
+  node-exporter (DaemonSet)   node CPU, memory, disk, network
+  kubelet / cAdvisor          per-container CPU/memory
+  kube-state-metrics          object state: replicas, pod phase,
+                              restarts, job status ...
+  control plane endpoints     apiserver, scheduler, etcd metrics
+  your app                    /metrics endpoint (client libraries)
+(metrics-server is different: only for k top/HPA, not history.)
+
+
+4. kube-prometheus-stack
+------------------------
+One Helm chart: Prometheus Operator + Prometheus + Alertmanager +
+Grafana + node-exporter + kube-state-metrics + dashboards + alert
+rules. The operator adds CRDs:
+  ServiceMonitor / PodMonitor   "scrape these Services/pods"
+  PrometheusRule                alerting/recording rules
+
+
+5. WHAT TO ALERT ON
+-------------------
+Alert on SYMPTOMS users feel (error rate, latency, availability) and
+on things that will soon break (disk filling, certificate expiring,
+crash looping), not on every high CPU spike. The "golden signals":
+latency, traffic, errors, saturation.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Metrics, logs, traces; OpenTelemetry ties them together.
+- Prometheus scrapes /metrics; PromQL queries; Alertmanager notifies.
+- ServiceMonitor tells Prometheus what to scrape.

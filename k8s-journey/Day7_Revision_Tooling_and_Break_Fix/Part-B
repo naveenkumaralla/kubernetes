@@ -1,0 +1,104 @@
+==================================================================
+DAY 7 - PART B: LAB
+Rebuild, tooling, and break/fix drills
+Time: 90 minutes
+==================================================================
+
+STEP 1: Delete and rebuild the cluster from memory
+--------------------------------------------------
+kind delete cluster --name lab
+kind get clusters            # should print nothing / "No kind clusters found."
+docker ps                    # node containers are gone
+
+cd ~/k8s-journey/kind
+Try to type kind-config.yaml yourself first (peek only if stuck), then:
+  kind create cluster --name lab --config kind-config.yaml
+  k get nodes
+
+
+STEP 2: Install k9s (terminal UI)
+---------------------------------
+cd /tmp
+curl -LO https://github.com/derailed/k9s/releases/latest/download/k9s_Linux_amd64.tar.gz
+tar -xzf k9s_Linux_amd64.tar.gz k9s
+sudo install -m 0755 k9s /usr/local/bin/k9s
+k9s version
+k9s
+
+Navigation inside k9s:
+  :pods      view pods          :nodes   view nodes
+  :ns        namespaces         /text    filter
+  d          describe           l        logs
+  s          shell              ctrl-d   delete
+  0          all namespaces     :q       quit
+
+Spend 15 minutes exploring kube-system with it.
+
+
+STEP 3: Install kubectx and kubens
+----------------------------------
+sudo git clone https://github.com/ahmetb/kubectx /opt/kubectx
+sudo ln -s /opt/kubectx/kubectx /usr/local/bin/kubectx
+sudo ln -s /opt/kubectx/kubens  /usr/local/bin/kubens
+kubectx            # lists contexts, current is highlighted
+kubens             # lists namespaces
+
+
+STEP 4: Run your own image in Kubernetes
+----------------------------------------
+Use the image you pushed on Day 3:
+
+k run myapp --image=YOURUSER/myapp:v1 --port=5000
+k get pod myapp -o wide
+k port-forward pod/myapp 5000:5000
+
+Terminal 2:
+  curl localhost:5000
+
+You should see "Hello from v1! Served by container: myapp".
+The hostname is now the POD name. This closes the loop: you built an
+image (Day 3), pushed it to a registry, and Kubernetes pulled and ran it.
+
+
+STEP 5: Break/fix drills
+------------------------
+Rule: fix each one using ONLY describe, logs, and get events.
+
+Drill 1: wrong image tag
+  k run d1 --image=nginx:nope
+
+Drill 2: a command that exits immediately
+  k run d2 --image=busybox -- sh -c "echo starting; exit 1"
+
+Drill 3: a pod that asks for impossible memory
+  k run d3 --image=nginx --dry-run=client -o yaml > d3.yaml
+  Edit d3.yaml. Under the container (same indent as "image:") add:
+      resources:
+        requests:
+          memory: "100Gi"
+  k apply -f d3.yaml
+
+Now investigate:
+  k get pods
+  k describe pod d1 | tail -15
+  k logs d2
+  k logs d2 --previous
+  k describe pod d3 | tail -10
+
+Fill in this table in your notes:
+
+  Pod  Status you saw       Reason in describe/logs        Fix
+  ---  -------------------  -----------------------------  ----------
+  d1   ImagePullBackOff     ...                            ...
+  d2   CrashLoopBackOff     ...                            ...
+  d3   Pending              0/3 nodes ... Insufficient     ...
+                            memory
+
+Clean up:
+  k delete pod d1 d2 d3 myapp
+
+
+STEP 6: Commit your week
+------------------------
+cd ~/k8s-journey
+git add . && git commit -m "week1 complete"

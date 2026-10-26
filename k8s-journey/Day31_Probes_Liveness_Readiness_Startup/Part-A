@@ -1,0 +1,90 @@
+==================================================================
+DAY 31 - PART A: THEORY
+Health Probes: Liveness, Readiness, Startup
+Time: 40 minutes
+==================================================================
+
+1. "RUNNING" IS NOT "HEALTHY"
+-----------------------------
+A container can be Running while the app inside is:
+  - still starting (loading data for 60 seconds)
+  - deadlocked (process alive, never answers)
+  - temporarily unable to serve (DB connection lost)
+Probes let the kubelet check the app itself.
+
+
+2. THE THREE PROBES
+-------------------
+Liveness   "Is it alive?"
+           Fails -> kubelet RESTARTS the container.
+           For deadlocks/stuck states that only a restart fixes.
+
+Readiness  "Can it serve traffic now?"
+           Fails -> pod marked NOT READY and REMOVED from Service
+           endpoints. No restart. Checked for the pod's whole life.
+           Also gates rolling updates (old pods stay until new ones
+           are Ready).
+
+Startup    "Has it finished starting?"
+           While it runs, liveness and readiness are paused.
+           Fails too long -> restart. For slow-starting apps.
+
+
+3. PROBE MECHANISMS
+-------------------
+  httpGet     HTTP GET; 200-399 = success
+  tcpSocket   TCP connection opens = success
+  exec        command exit code 0 = success
+  grpc        gRPC health check protocol
+
+
+4. TIMING FIELDS
+----------------
+  initialDelaySeconds  wait before the first probe (default 0)
+  periodSeconds        how often (default 10)
+  timeoutSeconds       how long to wait for a reply (default 1)
+  failureThreshold     consecutive failures to act (default 3)
+  successThreshold     consecutive successes to recover (default 1)
+
+Time to restart after a hang ~ periodSeconds x failureThreshold.
+Startup budget = failureThreshold x periodSeconds (e.g. 30 x 10 = 300s).
+
+
+5. EXAMPLE
+----------
+  containers:
+  - name: app
+    image: myapp:v1
+    startupProbe:
+      httpGet: {path: /healthz, port: 8080}
+      failureThreshold: 30
+      periodSeconds: 5
+    livenessProbe:
+      httpGet: {path: /healthz, port: 8080}
+      periodSeconds: 10
+      failureThreshold: 3
+    readinessProbe:
+      httpGet: {path: /ready, port: 8080}
+      periodSeconds: 5
+
+
+6. GOOD PRACTICES (AND COMMON MISTAKES)
+---------------------------------------
+- Liveness should check ONLY the process itself. Never check the
+  database in liveness: if the DB goes down, every pod restarts in a
+  loop and makes things worse. Put dependency checks in READINESS.
+- Don't make liveness too aggressive (timeoutSeconds 1 on a busy app
+  causes restart storms).
+- Use a startup probe instead of a huge initialDelaySeconds.
+- Every Service-backed app should have a readiness probe; it's what
+  makes rolling updates truly zero-downtime (Day 14 FAILs!).
+- Add a preStop sleep (5-10 s) so load balancers stop sending traffic
+  before the app shuts down.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Liveness fail = restart. Readiness fail = no traffic. Startup =
+  protect slow starts.
+- Dependencies belong in readiness, not liveness.
+- Readiness + preStop = real zero-downtime deploys.

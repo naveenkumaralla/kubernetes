@@ -1,0 +1,26 @@
+==================================================================
+DAY 54 - PART C: CHECKPOINT
+==================================================================
+
+1. Define GitOps in three sentences.
+Ans:
+
+
+2. What did selfHeal do when you scaled manually?
+Ans:
+
+
+3. What does prune do? Why can it be dangerous?
+Ans:
+
+
+4. How do you roll back a bad deploy in GitOps?
+Ans:
+
+
+5. Why doesn't CI need cluster credentials in a GitOps setup?
+Ans:
+
+
+6. What is the app-of-apps pattern?
+Ans:

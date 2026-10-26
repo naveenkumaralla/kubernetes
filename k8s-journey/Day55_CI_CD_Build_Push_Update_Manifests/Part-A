@@ -1,0 +1,64 @@
+==================================================================
+DAY 55 - PART A: THEORY
+CI/CD: Build, Push, Update Manifests
+Time: 40 minutes
+==================================================================
+
+1. CI vs CD
+-----------
+CI (Continuous Integration): on every push/PR -> test, lint, build
+  the image, scan it, push it to a registry with a unique tag.
+CD (Continuous Delivery/Deployment): get that image running in an
+  environment.
+
+In GitOps, CD = "update the image tag in the Git config repo";
+Argo CD does the actual deploy.
+
+
+2. THE FLOW YOU'LL BUILD
+------------------------
+  dev pushes code
+    -> GitHub Actions:
+         1. run tests
+         2. docker build, tag = git short SHA (immutable)
+         3. push to Docker Hub (or GHCR/ECR)
+         4. kustomize edit set image ... :<sha> in overlays/dev
+         5. commit + push that change
+    -> Argo CD sees the commit -> syncs dev
+    -> promotion to prod = PR that changes the prod overlay's tag
+
+
+3. IMAGE TAGGING
+----------------
+  - Never deploy "latest".
+  - Use git SHA (traceable) and/or semantic versions (v1.4.2) for
+    releases.
+  - Even better: pin by digest (myapp@sha256:...).
+  - Sign images (cosign) and generate SBOMs in mature pipelines.
+
+
+4. SECRETS IN CI
+----------------
+Store registry tokens in GitHub Actions secrets. For clouds, use OIDC
+federation from GitHub to AWS/Azure/GCP instead of long-lived keys
+(same idea as workload identity, Day 47).
+
+
+5. SEPARATE APP AND CONFIG REPOS (OPTIONAL)
+-------------------------------------------
+Many teams keep application code and deployment config in separate
+repos so config changes don't trigger app builds and access can be
+controlled separately. We use one repo for simplicity.
+
+
+6. OTHER DEPLOYMENT STRATEGIES
+-----------------------------
+Rolling (default), blue/green, canary. Argo Rollouts or Flagger add
+canary/blue-green with automatic analysis of Prometheus metrics.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- CI builds and pushes immutable, traceable images.
+- CD in GitOps = commit the new tag; Argo CD deploys.
+- No long-lived cloud keys in CI: use OIDC.

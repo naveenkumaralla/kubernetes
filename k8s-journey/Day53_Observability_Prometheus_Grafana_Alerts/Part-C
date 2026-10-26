@@ -1,0 +1,26 @@
+==================================================================
+DAY 53 - PART C: CHECKPOINT
+==================================================================
+
+1. What are the three pillars of observability and a tool for each?
+Ans:
+
+
+2. Push or pull: how does Prometheus collect metrics?
+Ans:
+
+
+3. node-exporter vs kube-state-metrics vs metrics-server?
+Ans:
+
+
+4. What does a ServiceMonitor do?
+Ans:
+
+
+5. Explain your HighErrorRate expression.
+Ans:
+
+
+6. What should you alert on, and what should you not?
+Ans:

@@ -1,0 +1,27 @@
+==================================================================
+DAY 31 - PART C: CHECKPOINT
+==================================================================
+
+1. What happens when each probe fails: liveness, readiness, startup?
+Ans:
+
+
+2. Why should liveness not check the database?
+Ans:
+
+
+3. How long does it take to restart a hung container with
+   periodSeconds 5 and failureThreshold 3?
+Ans:
+
+
+4. What happened when STARTUP_SECONDS exceeded the startup budget?
+Ans:
+
+
+5. Why did the FAIL count drop to zero in Step 8?
+Ans:
+
+
+6. Name the four probe mechanisms.
+Ans:

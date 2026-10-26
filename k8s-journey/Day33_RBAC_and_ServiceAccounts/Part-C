@@ -1,0 +1,32 @@
+==================================================================
+DAY 33 - PART C: CHECKPOINT
+==================================================================
+
+1. Name the four RBAC objects and what each does.
+Ans:
+
+
+2. Does Kubernetes have a User object? How does it know who alice is?
+Ans:
+
+
+3. What is the full name of SA "viewer" in namespace "dev" for RBAC
+   checks?
+Ans:
+
+
+4. Why couldn't alice read Secrets with the "view" role?
+Ans:
+
+
+5. Can RBAC deny a permission? How would you remove access?
+Ans:
+
+
+6. Write the command to check if user bob can delete deployments in
+   prod.
+Ans:
+
+
+7. Why set automountServiceAccountToken: false?
+Ans:

@@ -1,0 +1,35 @@
+==================================================================
+DAY 42 - PART A: THEORY (REVISION)
+Week 6 Review: Under the Hood
+Time: 30 minutes
+==================================================================
+
+Answer without looking:
+
+1. API request pipeline (authn -> ... -> watchers).
+2. Static pods: where, why, how to edit.
+3. etcd quorum; snapshot and restore steps.
+4. Controllers: level-triggered loops; chain for a Deployment.
+5. Scheduler: filter/score/bind; reading FailedScheduling.
+6. Node failure timeline.
+7. kubeadm node prerequisites; init phases; join.
+8. Upgrade order and skew rules.
+9. The troubleshooting layers.
+
+
+QUICK REFERENCE: FILES ON A kubeadm CONTROL PLANE
+-------------------------------------------------
+  /etc/kubernetes/manifests/*.yaml   static pods
+  /etc/kubernetes/pki/               certificates
+  /etc/kubernetes/admin.conf         admin kubeconfig
+  /etc/kubernetes/kubelet.conf       kubelet's kubeconfig
+  /var/lib/kubelet/config.yaml       kubelet configuration
+  /var/lib/etcd/                     etcd data
+  /etc/containerd/config.toml        runtime config
+  journalctl -u kubelet / containerd logs
+
+
+TODAY'S CHALLENGE
+-----------------
+A script breaks your kubeadm cluster in 3 random ways (you don't look
+at what it did). You have 30 minutes to get everything healthy again.

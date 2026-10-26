@@ -1,0 +1,109 @@
+==================================================================
+DAY 36 - PART B: LAB
+Explore the control plane on kind
+Time: 75-90 minutes
+==================================================================
+
+STEP 1: Static pod manifests
+----------------------------
+docker exec lab-control-plane ls -l /etc/kubernetes/manifests
+docker exec lab-control-plane cat /etc/kubernetes/manifests/kube-apiserver.yaml | less
+
+Find these flags in kube-apiserver.yaml and write what each means:
+  --etcd-servers
+  --authorization-mode
+  --enable-admission-plugins
+  --service-cluster-ip-range
+  --client-ca-file
+  --service-account-issuer
+
+
+STEP 2: Mirror pods
+-------------------
+k get pod -n kube-system kube-apiserver-lab-control-plane -o yaml | grep -A3 -E "kubernetes.io/config.(mirror|source)"
+k delete pod -n kube-system kube-scheduler-lab-control-plane
+k get pods -n kube-system | grep scheduler     # back immediately: the
+                                               # kubelet owns it, not the API
+
+
+STEP 3: Edit a static pod (restart a component)
+-----------------------------------------------
+docker exec -it lab-control-plane bash
+  cp /etc/kubernetes/manifests/kube-scheduler.yaml /root/
+  sed -i 's/- --leader-elect=true/- --leader-elect=true\n    - --v=4/' /etc/kubernetes/manifests/kube-scheduler.yaml
+  grep -- "--v=4" /etc/kubernetes/manifests/kube-scheduler.yaml
+  exit
+sleep 20
+k logs -n kube-system kube-scheduler-lab-control-plane | tail -5     # more verbose
+Restore:
+  docker exec lab-control-plane cp /root/kube-scheduler.yaml /etc/kubernetes/manifests/
+
+
+STEP 4: PKI and certificate expiry
+----------------------------------
+docker exec lab-control-plane ls /etc/kubernetes/pki /etc/kubernetes/pki/etcd
+docker exec lab-control-plane kubeadm certs check-expiration
+docker exec lab-control-plane openssl x509 -in /etc/kubernetes/pki/apiserver.crt -noout -subject -issuer -enddate -ext subjectAltName
+
+
+STEP 5: Talk to etcd directly
+-----------------------------
+ETCD="docker exec lab-control-plane etcdctl --endpoints=https://127.0.0.1:2379 \
+ --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+ --cert=/etc/kubernetes/pki/etcd/server.crt \
+ --key=/etc/kubernetes/pki/etcd/server.key"
+
+If etcdctl is not found in the node, run it inside the etcd pod:
+ETCD="k exec -n kube-system etcd-lab-control-plane -- etcdctl --endpoints=https://127.0.0.1:2379 \
+ --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+ --cert=/etc/kubernetes/pki/etcd/server.crt \
+ --key=/etc/kubernetes/pki/etcd/server.key"
+
+$ETCD member list -w table
+$ETCD endpoint status -w table
+$ETCD get /registry --prefix --keys-only | head -30
+$ETCD get /registry --prefix --keys-only | cut -d/ -f3 | sort | uniq -c | sort -rn | head
+
+k create deploy etcd-demo --image=nginx:1.27
+$ETCD get /registry/deployments/default/etcd-demo --keys-only
+$ETCD get /registry/deployments/default/etcd-demo | strings | head -20
+
+Watch etcd change live:
+  $ETCD watch /registry/deployments/default/etcd-demo &
+  k scale deploy etcd-demo --replicas=2
+  kill %1
+
+
+STEP 6: Walk the API with raw requests
+--------------------------------------
+k get --raw /api/v1 | python3 -m json.tool | head -20
+k get --raw /apis | python3 -m json.tool | grep '"name"' | head -30
+k get --raw "/apis/apps/v1/namespaces/default/deployments/etcd-demo" | python3 -m json.tool | head -20
+
+Use kubectl proxy for plain curl:
+  k proxy --port=8001 &
+  curl -s localhost:8001/api/v1/namespaces/default/pods | grep '"name"' | head
+  curl -s "localhost:8001/api/v1/namespaces/default/pods?watch=1" &
+  k run watchme --image=nginx:1.27      # see ADDED/MODIFIED events stream
+  kill %2 %1
+
+
+STEP 7: See admission at work
+-----------------------------
+k run adm --image=nginx:1.27 --dry-run=server -o yaml | grep -E "serviceAccountName|tolerations|dnsPolicy|terminationGracePeriod"
+
+--dry-run=server sends the object through the WHOLE pipeline
+(authn, authz, admission, validation) without saving it. The defaults
+you see were added by mutating admission and defaulting.
+
+
+STEP 8: Leader election
+-----------------------
+k get lease -n kube-system
+k get lease -n kube-system kube-scheduler -o yaml | grep -E "holderIdentity|renewTime"
+
+
+STEP 9: Clean up and commit
+---------------------------
+k delete deploy etcd-demo ; k delete pod watchme --ignore-not-found
+cd ~/k8s-journey && git add . && git commit -m "day36: control plane internals"

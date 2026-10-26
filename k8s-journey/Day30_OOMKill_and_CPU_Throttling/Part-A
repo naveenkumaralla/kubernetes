@@ -1,0 +1,69 @@
+==================================================================
+DAY 30 - PART A: THEORY
+OOMKill, CPU Throttling, and Node-Pressure Eviction
+Time: 30-40 minutes
+==================================================================
+
+1. CONTAINER OOMKILL (limit exceeded)
+-------------------------------------
+The container's cgroup hits memory.max -> the kernel OOM killer kills
+a process in it (usually PID 1) with SIGKILL.
+  Exit code 137 (128 + 9)
+  Last State: Terminated, Reason: OOMKilled
+  kubelet restarts it -> repeated -> CrashLoopBackOff
+
+Fixes: find the leak, or raise the memory limit to real peak usage.
+Java/Node apps: make the runtime aware of the container limit
+(-XX:MaxRAMPercentage, --max-old-space-size).
+
+
+2. NODE MEMORY PRESSURE (eviction)
+----------------------------------
+Different from OOMKill. The NODE is low on memory (sum of usage, not a
+single limit). The kubelet evicts pods to protect the node:
+  thresholds like memory.available < 100Mi
+  Node condition MemoryPressure=True
+  Pod status: Evicted (reason: The node was low on resource: memory)
+Order: BestEffort -> Burstable over request -> Guaranteed.
+Same idea for DiskPressure (nodefs/imagefs) and PIDPressure.
+
+If memory runs out faster than the kubelet reacts, the KERNEL OOM
+killer acts on the node, using oom_score_adj set from QoS
+(BestEffort = 1000, Guaranteed = -997).
+
+
+3. CPU THROTTLING
+-----------------
+CFS quota: limit 200m = 20ms of CPU per 100ms period.
+A busy single-threaded app hits the quota early and waits for the next
+period. Multi-threaded apps can burn the quota in a few ms.
+Symptoms: high latency, timeouts, but no restarts, no errors.
+Evidence: cgroup cpu.stat -> nr_throttled, throttled_usec.
+Prometheus metric: container_cpu_cfs_throttled_periods_total.
+
+
+4. EXIT CODES TO KNOW
+---------------------
+  0    success
+  1    application error
+  126  command cannot execute
+  127  command not found
+  137  SIGKILL (OOMKilled, or killed after grace period)
+  139  SIGSEGV (segfault)
+  143  SIGTERM (normal graceful stop)
+
+
+5. HOW TO RIGHT-SIZE
+--------------------
+  1. Run under realistic load, watch k top / Prometheus for a week
+  2. requests ~ typical (p50-p90) usage
+  3. memory limit ~ peak + 20-30% headroom
+  4. CPU limit: none, or generous (2-4x request), watch throttling
+  5. Tools: Vertical Pod Autoscaler in "recommend" mode, Goldilocks
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- OOMKilled = container over its own limit (exit 137).
+- Evicted = node under pressure; QoS decides who goes first.
+- Throttling = slow but alive; check cpu.stat.

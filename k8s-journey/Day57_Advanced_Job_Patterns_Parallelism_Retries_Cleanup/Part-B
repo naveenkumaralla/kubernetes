@@ -1,0 +1,138 @@
+==================================================================
+DAY 57 - PART B: LAB
+Sharded jobs, failure policies, and a Redis work queue
+Time: 90 minutes
+==================================================================
+
+kubectx kind-lab
+mkdir -p ~/k8s-journey/week9/jobs && cd $_
+k create ns batch ; kubens batch
+
+
+STEP 1: Indexed job with per-index retries
+------------------------------------------
+vi indexed-retries.yaml
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shards
+spec:
+  completionMode: Indexed
+  completions: 6
+  parallelism: 3
+  backoffLimitPerIndex: 1
+  maxFailedIndexes: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo "shard $JOB_COMPLETION_INDEX starting"
+          if [ "$JOB_COMPLETION_INDEX" = "4" ]; then echo "bad data in shard 4"; exit 1; fi
+          sleep 3; echo "shard $JOB_COMPLETION_INDEX done"
+
+k apply -f indexed-retries.yaml
+k get pods -l job-name=shards -w
+k get job shards -o jsonpath='completed={.status.completedIndexes} failed={.status.failedIndexes}{"\n"}'
+
+Shard 4 fails twice (1 retry) and is marked failed; the others finish.
+The Job fails overall (an index failed) but you know EXACTLY which.
+
+
+STEP 2: podFailurePolicy: stop on a real bug
+--------------------------------------------
+vi pod-failure-policy.yaml
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pfp
+spec:
+  backoffLimit: 6
+  podFailurePolicy:
+    rules:
+    - action: FailJob
+      onExitCodes:
+        containerName: worker
+        operator: In
+        values: [42]
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: busybox:1.36
+        command: ["sh", "-c", "echo 'config is invalid'; exit 42"]
+
+k apply -f pod-failure-policy.yaml
+k get pods -l job-name=pfp       # only ONE pod, no retries
+k describe job pfp | tail -4     # PodFailurePolicy reason
+
+Change exit code to 1 and re-run: now it retries up to backoffLimit.
+
+
+STEP 3: Suspend / resume
+------------------------
+k create job later --image=busybox:1.36 --dry-run=client -o yaml -- sh -c "echo running now" > later.yaml
+Add "suspend: true" under spec. Apply.
+k get job later ; k get pods -l job-name=later      # no pods
+k patch job later -p '{"spec":{"suspend":false}}'
+k logs job/later
+
+
+STEP 4: Redis work queue
+------------------------
+k create deploy redis --image=redis:7-alpine --port=6379
+k expose deploy redis --port=6379
+k rollout status deploy/redis
+
+Producer: push 20 tasks
+  k run producer --rm -it --image=redis:7-alpine --restart=Never -- \
+    sh -c 'for i in $(seq 1 20); do redis-cli -h redis RPUSH jobs "task-$i"; done; redis-cli -h redis LLEN jobs'
+
+Worker Job: pops until the queue is empty
+vi queue-job.yaml
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: queue-workers
+spec:
+  parallelism: 4
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: worker
+        image: redis:7-alpine
+        command:
+        - sh
+        - -c
+        - |
+          while true; do
+            T=$(redis-cli -h redis LPOP jobs)
+            [ -z "$T" ] && echo "queue empty, exiting" && exit 0
+            echo "$(hostname) processing $T"; sleep 1
+          done
+
+k apply -f queue-job.yaml
+k get pods -l job-name=queue-workers -w
+for p in $(k get pods -l job-name=queue-workers -o name); do k logs $p | tail -3; done
+
+No completions set: the Job is done when all workers exit 0. Each task
+was processed exactly once (LPOP is atomic). For real "at-least-once"
+safety use BRPOPLPUSH/LMOVE into a processing list, or a real queue.
+
+
+STEP 5: Clean up and commit
+---------------------------
+kubens default ; k delete ns batch
+cd ~/k8s-journey && git add . && git commit -m "day57: advanced jobs"

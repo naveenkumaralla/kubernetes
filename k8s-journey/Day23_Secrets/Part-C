@@ -1,0 +1,31 @@
+==================================================================
+DAY 23 - PART C: CHECKPOINT
+==================================================================
+
+1. Is a Kubernetes Secret encrypted by default? Explain.
+Ans:
+
+
+2. data vs stringData: what is the difference?
+Ans:
+
+
+3. Why are mounted files preferred over env vars for secrets?
+Ans:
+
+
+4. Where is a mounted Secret stored on the node, and why does that
+   matter?
+Ans:
+
+
+5. How do you let pods pull from a private registry?
+Ans:
+
+
+6. Name two ways to store secrets safely in Git or outside the cluster.
+Ans:
+
+
+7. Which RBAC permission lets someone read all secrets in a namespace?
+Ans:

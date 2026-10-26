@@ -1,0 +1,97 @@
+==================================================================
+DAY 14 - PART B: LAB (CHECKPOINT PROJECT)
+Zero-downtime update under fire
+Time: 60-90 minutes
+==================================================================
+
+GOAL
+----
+Run your own app (YOURUSER/myapp) with 3 replicas, update it from v1
+to v2 with zero downtime while pods are being killed, then roll back.
+
+
+STEP 1: Build and push v2 of your app
+-------------------------------------
+cd ~/k8s-journey/myapp
+Edit app.py: change "Hello from v1!" to "Hello from v2!"
+docker build -t YOURUSER/myapp:v2 .
+docker push YOURUSER/myapp:v2
+(Podman: podman build -t docker.io/YOURUSER/myapp:v2 -f Containerfile . && podman push docker.io/YOURUSER/myapp:v2)
+
+
+STEP 2: Write the manifests yourself
+------------------------------------
+mkdir -p ~/k8s-journey/manifests/week2/checkpoint && cd $_
+
+Create checkpoint.yaml containing:
+  - a Namespace "week2"
+  - a Deployment "myapp" in week2:
+      replicas 3, image YOURUSER/myapp:v1, containerPort 5000,
+      RollingUpdate with maxSurge 1 and maxUnavailable 0,
+      label app=myapp, revisionHistoryLimit 5
+  - a Service "myapp" in week2, port 80 -> targetPort 5000,
+    selector app=myapp
+
+Hint for the Service:
+  k create service clusterip myapp --tcp=80:5000 -n week2 --dry-run=client -o yaml
+  (then change the selector to app: myapp)
+
+k apply -f checkpoint.yaml
+k get all -n week2
+
+
+STEP 3: Start a traffic generator
+---------------------------------
+k run traffic -n week2 --image=busybox:1.36 -- sh -c 'while true; do wget -qO- -T 1 myapp || echo FAIL; sleep 0.2; done'
+k logs -f traffic -n week2
+
+You should see responses from different pod names (load balancing).
+
+
+STEP 4: Start a "chaos" loop that kills pods
+--------------------------------------------
+In another terminal:
+  while true; do
+    POD=$(kubectl get pod -n week2 -l app=myapp -o name | shuf -n1)
+    echo "killing $POD"
+    kubectl delete -n week2 $POD --wait=false
+    sleep 15
+  done
+
+(Every 15 seconds it deletes one random myapp pod.)
+
+
+STEP 5: Update to v2 during chaos
+---------------------------------
+Update the image in checkpoint.yaml to v2, then:
+  k annotate deploy/myapp -n week2 kubernetes.io/change-cause="v2" --overwrite
+  k apply -f checkpoint.yaml
+  k rollout status deploy/myapp -n week2
+
+Watch the traffic log switch from v1 to v2. Count FAIL lines.
+
+
+STEP 6: Roll back
+-----------------
+k rollout undo deploy/myapp -n week2
+k rollout status deploy/myapp -n week2
+k rollout history deploy/myapp -n week2
+
+Traffic log shows v1 again. Stop the chaos loop (Ctrl+C).
+Remember to put v1 back in checkpoint.yaml so file = cluster.
+
+
+STEP 7: Success criteria
+------------------------
+[ ] 3 replicas running from your own YAML file
+[ ] Pods recreated automatically when killed
+[ ] Updated v1 -> v2 with 0 (or very few) FAILs
+[ ] Rolled back to v1
+[ ] k diff -f checkpoint.yaml shows no meaningful difference
+[ ] Everything deleted and recreated from the file in under 2 minutes:
+      k delete ns week2 && k apply -f checkpoint.yaml
+
+
+STEP 8: Commit
+--------------
+cd ~/k8s-journey && git add . && git commit -m "week2 complete"

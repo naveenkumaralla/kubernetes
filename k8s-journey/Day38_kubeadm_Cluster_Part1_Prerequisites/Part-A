@@ -1,0 +1,64 @@
+==================================================================
+DAY 38 - PART A: THEORY
+Building a Real Cluster with kubeadm, Part 1: Prerequisites
+Time: 40 minutes
+==================================================================
+
+1. WHY DO THIS?
+---------------
+kind hides the setup. Building with kubeadm on real VMs teaches what
+every node needs and is required knowledge for the CKA exam and for
+on-premises clusters.
+
+
+2. LAB DESIGN
+-------------
+  cp1      control plane   2 vCPU, 2-4 GB RAM, 20 GB disk
+  worker1  worker          2 vCPU, 2 GB RAM
+  worker2  worker          2 vCPU, 2 GB RAM
+All on one network that can reach each other and the internet.
+Options: VirtualBox/VMware/KVM VMs, Multipass (Ubuntu), or 3 small
+cloud VMs. Use the same OS on all (Rocky/RHEL 9 or Ubuntu 22.04/24.04).
+
+
+3. WHAT EVERY NODE NEEDS
+------------------------
+  - unique hostname, MAC, product_uuid
+  - swap OFF (or explicitly configured; simplest is off)
+  - kernel modules: overlay, br_netfilter
+  - sysctls: net.bridge.bridge-nf-call-iptables=1,
+             net.ipv4.ip_forward=1
+  - a container runtime: containerd, with SystemdCgroup = true
+    (kubelet and runtime must use the SAME cgroup driver: systemd)
+  - kubelet, kubeadm, kubectl from pkgs.k8s.io, same versions
+  - ports open:
+      control plane: 6443 (API), 2379-2380 (etcd), 10250 (kubelet),
+                     10257, 10259
+      workers:       10250, 30000-32767 (NodePorts)
+      plus your CNI's ports (Calico: 179 BGP, 4789 VXLAN, 5473 Typha)
+  - RHEL family: SELinux permissive for the lab, firewalld rules or off
+
+
+4. WHAT EACH PACKAGE DOES
+-------------------------
+  kubeadm   bootstraps the cluster (certs, kubeconfigs, static pods,
+            join tokens). Runs once per node, then for upgrades.
+  kubelet   systemd service on every node; runs pods.
+  kubectl   client.
+  containerd + runc   runtime.
+  crictl    CLI for the runtime (CRI); like docker ps for Kubernetes.
+
+
+5. VERSIONS
+-----------
+Kubernetes releases a minor version about every 4 months; each is
+supported ~14 months. kubeadm, kubelet and kubectl are pinned and
+held (not auto-updated) because upgrades must be done in order, one
+minor version at a time (Day 40).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Swap off, modules + sysctls, containerd with systemd cgroups.
+- Install and HOLD kubeadm/kubelet/kubectl.
+- Open the required ports.

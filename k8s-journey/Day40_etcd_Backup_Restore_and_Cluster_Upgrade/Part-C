@@ -1,0 +1,31 @@
+==================================================================
+DAY 40 - PART C: CHECKPOINT
+==================================================================
+
+1. What does an etcd snapshot contain, and what does it NOT contain?
+Ans:
+
+
+2. List the restore steps in order.
+Ans:
+
+
+3. After the restore, which namespace came back and which disappeared?
+   Why?
+Ans:
+
+
+4. Why can't you upgrade from 1.33 straight to 1.35?
+Ans:
+
+
+5. Why drain a node before upgrading its kubelet?
+Ans:
+
+
+6. What is the version skew rule between kubelet and API server?
+Ans:
+
+
+7. Did your app stay available during the worker upgrades? Why?
+Ans:

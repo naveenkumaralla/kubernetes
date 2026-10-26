@@ -1,0 +1,152 @@
+==================================================================
+DAY 5 - PART B: LAB
+Install kubectl and kind, build a 3-node cluster
+Time: 90 minutes
+==================================================================
+
+PODMAN USERS (RHEL / Rocky / Alma): kind works best with Docker.
+If you only have Podman, run kind as root with:
+    export KIND_EXPERIMENTAL_PROVIDER=podman
+and use "sudo" for kind commands. Installing Docker CE is simpler for
+this course: https://docs.docker.com/engine/install/ (choose your distro)
+
+
+STEP 1: Install kubectl
+-----------------------
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+kubectl version --client
+
+Expected: "Client Version: v1.xx.x"
+(On ARM machines replace amd64 with arm64.)
+
+
+STEP 2: Install kind
+--------------------
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+sudo install -m 0755 kind /usr/local/bin/kind
+kind version
+
+
+STEP 3: Shortcuts and autocomplete (saves hours later)
+------------------------------------------------------
+echo 'alias k=kubectl' >> ~/.bashrc
+echo 'source <(kubectl completion bash)' >> ~/.bashrc
+echo 'complete -o default -F __start_kubectl k' >> ~/.bashrc
+source ~/.bashrc
+
+If completion fails, install it: sudo dnf install -y bash-completion
+(or: sudo apt install -y bash-completion), then open a new shell.
+
+Test: type "k get no" and press TAB. It should complete to "nodes".
+
+
+STEP 4: Create a 3-node cluster
+-------------------------------
+mkdir -p ~/k8s-journey/kind && cd ~/k8s-journey/kind
+
+cat > kind-config.yaml <<EOF
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+- role: worker
+- role: worker
+EOF
+
+kind create cluster --name lab --config kind-config.yaml
+
+This takes 1-3 minutes. Read the output: it creates the node
+containers, writes the config, starts the control plane, installs the
+CNI, installs a StorageClass, and joins the workers.
+
+
+STEP 5: Explore the cluster
+---------------------------
+k cluster-info
+k get nodes
+k get nodes -o wide
+k get namespaces
+k get pods -A
+
+You should see 3 nodes in "Ready" status. In namespace kube-system,
+find these pods and match each one to Part A:
+
+  kube-apiserver-lab-control-plane          -> API server
+  etcd-lab-control-plane                    -> etcd
+  kube-scheduler-lab-control-plane          -> scheduler
+  kube-controller-manager-lab-control-plane -> controller manager
+  kube-proxy-xxxxx   (one per node)         -> kube-proxy
+  coredns-xxxxx                             -> cluster DNS (Week 3)
+  kindnet-xxxxx      (one per node)         -> CNI plugin
+
+
+STEP 6: Look at a node in detail
+--------------------------------
+k describe node lab-worker
+
+Find these sections and note the values:
+  - Capacity / Allocatable   (CPU, memory, max pods)
+  - Conditions               (Ready, MemoryPressure, DiskPressure)
+  - System Info              (Container Runtime Version: containerd://...)
+  - Non-terminated Pods
+
+
+STEP 7: Understand your kubeconfig
+----------------------------------
+k config view
+k config current-context
+k config get-contexts
+ls -l ~/.kube/config
+
+Identify the three sections: clusters, users, contexts.
+A context = cluster + user (+ default namespace).
+Current context should be "kind-lab".
+
+
+STEP 8: See the cluster as containers
+-------------------------------------
+docker ps
+
+You will see lab-control-plane, lab-worker, lab-worker2.
+Each "node" is a container running systemd, kubelet and containerd.
+
+docker exec -it lab-worker bash
+  systemctl status kubelet --no-pager | head -5
+  ps aux | grep -E "kubelet|containerd" | grep -v grep
+  exit
+
+
+STEP 9: Talk to the API server directly
+---------------------------------------
+k get --raw /healthz ; echo
+k get --raw /version
+k api-resources | head -20
+k api-resources | wc -l
+
+api-resources lists every object type the cluster knows.
+
+
+STEP 10: See the control plane as static pods
+---------------------------------------------
+docker exec lab-control-plane ls /etc/kubernetes/manifests
+
+These YAML files are read directly by the kubelet on the control-plane
+node. That is how the control plane runs as pods (Week 6 goes deeper).
+
+
+STEP 11: Save your work
+-----------------------
+cd ~/k8s-journey
+git add . && git commit -m "day5: kind cluster"
+
+
+TROUBLESHOOTING
+---------------
+- "permission denied ... docker.sock": run "newgrp docker" or log out
+  and back in.
+- kind create hangs or fails: check free RAM (free -h); you need about
+  4 GB. For a lighter lab use a single node: kind create cluster --name lab
+- "too many open files":
+    sudo sysctl fs.inotify.max_user_watches=524288
+    sudo sysctl fs.inotify.max_user_instances=512

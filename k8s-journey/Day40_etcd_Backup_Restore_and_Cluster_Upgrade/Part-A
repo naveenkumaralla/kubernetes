@@ -1,0 +1,80 @@
+==================================================================
+DAY 40 - PART A: THEORY
+etcd Backup/Restore and Cluster Upgrades
+Time: 40 minutes
+==================================================================
+
+PART 1: BACKUP AND RESTORE
+==========================
+
+1. WHAT TO BACK UP
+------------------
+  etcd snapshot             ALL cluster state (objects)
+  /etc/kubernetes/pki       certificates and keys (CA!)
+  your manifests / Helm values / Git repo
+NOT in etcd: data inside PersistentVolumes. Back those up separately
+(volume snapshots, Velero, application dumps like Day 27).
+
+Velero: popular tool that backs up Kubernetes objects AND volume
+snapshots to object storage; used for migrations and DR.
+
+
+2. SNAPSHOT
+-----------
+  ETCDCTL_API=3 etcdctl snapshot save /backup/etcd.db \
+    --endpoints=https://127.0.0.1:2379 \
+    --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+    --cert=/etc/kubernetes/pki/etcd/server.crt \
+    --key=/etc/kubernetes/pki/etcd/server.key
+  etcdutl snapshot status /backup/etcd.db -w table
+
+
+3. RESTORE (single control plane, kubeadm)
+------------------------------------------
+  1. Stop the API server and etcd: move their manifests out of
+     /etc/kubernetes/manifests
+  2. etcdutl snapshot restore /backup/etcd.db --data-dir /var/lib/etcd-restore
+  3. Point etcd.yaml's hostPath (etcd-data volume) to /var/lib/etcd-restore
+  4. Move the manifests back; kubelet starts them
+  5. Restart kubelet; verify objects
+Everything created after the snapshot is gone; things deleted after
+it come back.
+
+
+PART 2: UPGRADES
+================
+
+4. RULES
+--------
+- One MINOR version at a time: 1.33 -> 1.34 -> 1.35 (no skipping).
+- Control plane first, then workers.
+- kubelet may be up to 3 minors OLDER than the API server, never newer.
+- Read the release notes (removed APIs!) before upgrading.
+
+
+5. kubeadm UPGRADE STEPS
+------------------------
+Control plane node:
+  1. change package repo to the new minor (pkgs.k8s.io/.../v1.34)
+  2. upgrade kubeadm only
+  3. kubeadm upgrade plan
+  4. kubeadm upgrade apply v1.34.x   (static pods, certs renewed,
+                                       CoreDNS/kube-proxy upgraded)
+  5. drain the node, upgrade kubelet + kubectl, restart kubelet,
+     uncordon
+Each worker, one at a time:
+  1. repo + kubeadm upgrade
+  2. kubeadm upgrade node
+  3. drain from control plane, upgrade kubelet + kubectl, restart,
+     uncordon
+
+Managed clouds do the control plane for you and roll node pools
+(Week 7), but the rules (one minor at a time, deprecated APIs,
+PodDisruptionBudgets) still apply.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- etcd snapshot + PKI = cluster state; PV data needs its own backup.
+- Restore = stop, restore to new dir, repoint, start.
+- Upgrade one minor at a time; control plane first; drain nodes.

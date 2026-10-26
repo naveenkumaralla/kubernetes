@@ -1,0 +1,31 @@
+==================================================================
+DAY 16 - PART C: CHECKPOINT
+==================================================================
+
+1. What three things does a Service give you?
+Ans:
+
+
+2. Explain port vs targetPort with an example.
+Ans:
+
+
+3. Your Service has no endpoints. What are the two most likely causes?
+Ans:
+
+
+4. Why can't you ping a ClusterIP?
+Ans:
+
+
+5. Which component turns Services into iptables rules, and on which
+   nodes does it run?
+Ans:
+
+
+6. What is a headless Service, and what does its DNS return?
+Ans:
+
+
+7. Did the ClusterIP change when you deleted all the pods? Why?
+Ans:

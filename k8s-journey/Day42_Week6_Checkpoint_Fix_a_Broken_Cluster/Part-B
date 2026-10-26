@@ -1,0 +1,84 @@
+==================================================================
+DAY 42 - PART B: LAB (CHECKPOINT)
+Fix a randomly broken cluster in 30 minutes
+Time: 60-90 minutes
+==================================================================
+
+STEP 1: Snapshot all VMs ("before-chaos")
+-----------------------------------------
+If you get completely stuck, you can restore.
+
+
+STEP 2: Deploy a "canary" app that must work at the end
+-------------------------------------------------------
+k create deploy canary --image=YOURUSER/myapp:v1 --replicas=3
+k expose deploy canary --type=NodePort --port=80 --target-port=5000
+NP=$(k get svc canary -o jsonpath='{.spec.ports[0].nodePort}') ; echo $NP
+curl worker1:$NP
+
+
+STEP 3: The chaos script (written by you, run without reading)
+--------------------------------------------------------------
+Ideally a friend writes it. Otherwise create it, then don't look at
+which faults it chose. Save as ~/chaos.sh on cp1. It uses ssh to the
+workers, so set up key-based ssh from cp1 to worker1/worker2 first
+(ssh-keygen ; ssh-copy-id worker1 ; ssh-copy-id worker2) and make sure
+your user has sudo without a password prompt for the lab, or run the
+worker faults by hand.
+
+#!/bin/bash
+# chaos.sh - applies 3 random faults and records them in /root/.chaos
+faults=(
+ "ssh worker1 sudo systemctl stop kubelet"
+ "ssh worker2 sudo systemctl stop containerd"
+ "kubectl scale deploy coredns -n kube-system --replicas=0"
+ "kubectl taint node worker1 chaos=true:NoExecute"
+ "kubectl patch svc canary -p '{\"spec\":{\"selector\":{\"app\":\"canaryX\"}}}'"
+ "kubectl set image deploy/canary myapp=YOURUSER/myapp:nope"
+ "kubectl cordon worker2"
+ "sudo sed -i 's/- kube-scheduler$/- kube-schedulerX/' /etc/kubernetes/manifests/kube-scheduler.yaml"
+ "ssh worker1 \"sudo sed -i 's/cgroupDriver: systemd/cgroupDriver: cgroupfs/' /var/lib/kubelet/config.yaml && sudo systemctl restart kubelet\""
+ "kubectl delete endpointslice -l kubernetes.io/service-name=kubernetes"
+)
+for i in $(shuf -i 0-$((${#faults[@]}-1)) -n 3); do
+  echo "${faults[$i]}" | sudo tee -a /root/.chaos >/dev/null
+  eval "${faults[$i]}" >/dev/null 2>&1
+done
+echo "3 faults applied. Start your 30-minute timer."
+
+(The image fault assumes the container is called "myapp"; check with
+ k get deploy canary -o jsonpath='{.spec.template.spec.containers[0].name}'
+ The endpointslice fault self-heals: a good lesson in reconciliation.)
+
+bash ~/chaos.sh
+
+
+STEP 4: Fix within 30 minutes
+-----------------------------
+Start a timer. Use only the method from Day 41. Write each finding in
+Part C as you go.
+
+Done when ALL are true:
+  [ ] k get nodes: all Ready, none SchedulingDisabled
+  [ ] k get pods -A: nothing failing
+  [ ] k run t --rm -it --image=busybox:1.36 -- nslookup kubernetes.default  works
+  [ ] curl worker1:$NP and curl worker2:$NP return your app
+  [ ] k get deploy canary: 3/3
+
+
+STEP 5: Check your answers
+--------------------------
+sudo cat /root/.chaos
+Compare with what you found. Run the chaos script again on another day
+for more practice (or restore the snapshot and retry).
+
+
+STEP 6: Optional: tear down to free resources
+---------------------------------------------
+Week 7 uses the cloud. You can stop (not delete) the VMs:
+  multipass stop cp1 worker1 worker2
+
+
+STEP 7: Commit
+--------------
+cd ~/k8s-journey && git add . && git commit -m "week6 complete"

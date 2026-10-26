@@ -1,0 +1,134 @@
+==================================================================
+DAY 8 - PART B: LAB
+Write, generate, and apply YAML
+Time: 75-90 minutes
+==================================================================
+
+STEP 0: Prepare a folder for this week
+--------------------------------------
+mkdir -p ~/k8s-journey/manifests/week2 && cd ~/k8s-journey/manifests/week2
+k get nodes        # cluster up? if not: kind create cluster --name lab --config ~/k8s-journey/kind/kind-config.yaml
+
+
+STEP 1: Write a pod by hand (no copy-paste!)
+--------------------------------------------
+vi pod-web.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web
+  labels:
+    app: web
+    tier: frontend
+spec:
+  containers:
+  - name: web
+    image: nginx:1.27
+    ports:
+    - containerPort: 80
+
+Validate, then apply:
+  k apply -f pod-web.yaml --dry-run=client
+  k apply -f pod-web.yaml
+  k get pods --show-labels
+
+
+STEP 2: Break the YAML on purpose
+---------------------------------
+a) Replace the 2 spaces before "- name: web" with a TAB and apply.
+   Read the error. Fix it.
+b) Change "containers" to "container". Apply. Read the error
+   ("unknown field"). Fix it.
+c) Change "kind: Pod" to "kind: pod". What happens?
+
+Lesson: the error message tells you the line or field. Read it.
+
+
+STEP 3: Generate YAML
+---------------------
+k run gen --image=nginx:1.27 --port=80 --labels=app=gen --dry-run=client -o yaml > pod-gen.yaml
+cat pod-gen.yaml
+
+Notice the extra fields (creationTimestamp: null, resources: {},
+status: {}). They are harmless; delete them to keep files clean.
+
+k apply -f pod-gen.yaml
+
+
+STEP 4: Use k explain like a manual
+-----------------------------------
+k explain pod
+k explain pod.spec
+k explain pod.spec.containers
+k explain pod.spec.containers.env
+k explain pod.spec.restartPolicy
+
+Answer from the output: what are the allowed values of restartPolicy,
+and what is the default?
+
+
+STEP 5: Update a pod with apply (and hit the immutability wall)
+---------------------------------------------------------------
+Edit pod-web.yaml: add a label "version: v1" under labels. Apply.
+  k apply -f pod-web.yaml
+  k get pod web --show-labels           # label changed in place: OK
+
+Now change the image to nginx:1.26 and apply. This works (image is
+one of the few mutable fields). Watch the RESTARTS column:
+  k get pod web
+
+Now add a second port (containerPort: 8080) and apply.
+  -> Error: "Pod updates may not change fields other than ..."
+Pods are mostly immutable. Fix with:
+  k delete -f pod-web.yaml && k apply -f pod-web.yaml
+or:
+  k replace --force -f pod-web.yaml
+
+
+STEP 6: k diff
+--------------
+Change the label tier: frontend to tier: web in pod-web.yaml.
+  k diff -f pod-web.yaml
+Read the diff, then apply.
+
+
+STEP 7: Several objects in one file
+-----------------------------------
+vi two-pods.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: one
+spec:
+  containers:
+  - name: c
+    image: busybox:1.36
+    command: ["sh", "-c", "sleep 3600"]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: two
+spec:
+  containers:
+  - name: c
+    image: busybox:1.36
+    command: ["sh", "-c", "sleep 3600"]
+
+k apply -f two-pods.yaml
+k get pods
+k delete -f two-pods.yaml
+
+
+STEP 8: Apply a whole folder
+----------------------------
+k apply -f .          # applies every YAML in the folder
+k get pods
+k delete -f .         # deletes everything the folder describes
+
+
+STEP 9: Commit
+--------------
+cd ~/k8s-journey && git add . && git commit -m "day8: yaml basics"

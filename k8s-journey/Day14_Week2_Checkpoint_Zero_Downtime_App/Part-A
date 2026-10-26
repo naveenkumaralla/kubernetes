@@ -1,0 +1,46 @@
+==================================================================
+DAY 14 - PART A: THEORY (REVISION)
+Week 2 Review: Workloads
+Time: 30 minutes
+==================================================================
+
+Answer without looking, then check your notes from Days 8-13.
+
+1. The 4 required YAML fields and what goes in each.
+2. How to generate YAML for a pod and for a deployment.
+3. Init container vs sidecar container.
+4. What restartPolicy values exist and which one Deployments use.
+5. How a ReplicaSet decides which pods are "its" pods.
+6. How a Deployment performs a rolling update (ReplicaSets involved).
+7. maxSurge and maxUnavailable.
+8. How to roll back, and to a specific revision.
+9. Namespaces: what they isolate and what they don't.
+
+
+SUMMARY TABLE
+-------------
+Object      Purpose                          Self-healing  Updates
+----------  -------------------------------  ------------  ---------
+Pod         run containers                   no            mostly no
+ReplicaSet  keep N pods                      yes           no
+Deployment  keep N pods + versioned updates  yes           rolling
+
+
+COMMAND CHEAT SHEET
+-------------------
+  k create deploy NAME --image=IMG --replicas=N --dry-run=client -o yaml
+  k apply -f FILE|DIR [-n NS]
+  k diff -f FILE
+  k scale deploy NAME --replicas=N
+  k set image deploy/NAME CONTAINER=IMG
+  k rollout status|history|undo|restart|pause|resume deploy/NAME
+  k get pods -l KEY=VALUE --show-labels
+  k label / k annotate
+  kubens NS
+
+
+TODAY'S CHALLENGE
+-----------------
+Part B is a checkpoint project. Do it WITHOUT looking at earlier days.
+Only use: k explain, --dry-run=client -o yaml, and --help.
+Target time: 60 minutes.

@@ -1,0 +1,92 @@
+==================================================================
+DAY 25 - PART A: THEORY
+PersistentVolumes, PersistentVolumeClaims, StorageClasses
+Time: 40 minutes
+==================================================================
+
+1. THE THREE OBJECTS
+--------------------
+PersistentVolume (PV)        a piece of real storage in the cluster
+                             (cloud disk, NFS share, local disk).
+                             Cluster-scoped. Created by an admin or
+                             dynamically.
+PersistentVolumeClaim (PVC)  a REQUEST for storage by a user:
+                             "I need 5Gi, ReadWriteOnce, class fast".
+                             Namespaced. Pods mount PVCs.
+StorageClass (SC)            a "type" of storage + the provisioner
+                             that creates PVs on demand.
+
+Analogy: PV = a parking space, PVC = your parking ticket, StorageClass
+= the parking company that builds a new space when you buy a ticket.
+
+
+2. STATIC vs DYNAMIC PROVISIONING
+---------------------------------
+Static:   admin creates PVs in advance; PVCs bind to a matching one.
+Dynamic:  PVC names a StorageClass; its provisioner (a CSI driver)
+          creates the disk + PV automatically. This is the norm.
+
+  Pod -> PVC -> (StorageClass -> CSI driver creates disk) -> PV -> disk
+
+
+3. ACCESS MODES
+---------------
+  ReadWriteOnce (RWO)      mounted read-write by ONE NODE (block disks:
+                           EBS, Azure Disk, PD)
+  ReadOnlyMany (ROX)       many nodes read-only
+  ReadWriteMany (RWX)      many nodes read-write (file storage: NFS,
+                           EFS, Azure Files, Filestore)
+  ReadWriteOncePod (RWOP)  exactly one POD
+
+
+4. RECLAIM POLICY (what happens to the disk when the PVC is deleted)
+--------------------------------------------------------------------
+  Delete   (default for dynamic) disk deleted too  <- careful!
+  Retain   PV and disk kept; admin cleans up manually
+
+
+5. VOLUME BINDING MODE
+----------------------
+  Immediate             create the disk as soon as the PVC exists
+  WaitForFirstConsumer  wait until a pod uses it, then create the disk
+                        in the SAME ZONE as the node the pod is
+                        scheduled on (important in the cloud, Week 7)
+
+PVC status: Pending -> Bound.
+
+
+6. A PVC AND A POD
+------------------
+  apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: data
+  spec:
+    accessModes: ["ReadWriteOnce"]
+    storageClassName: standard     # omit = default class
+    resources:
+      requests:
+        storage: 1Gi
+  ---
+  spec:
+    volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: data
+
+
+7. CSI: THE STORAGE PLUGIN INTERFACE
+------------------------------------
+The Container Storage Interface lets any vendor write a driver:
+  AWS EBS CSI, Azure Disk CSI, GCE PD CSI, Ceph, NetApp, Longhorn,
+  local-path (kind's default).
+CSI drivers also do snapshots (VolumeSnapshot) and expansion
+(allowVolumeExpansion: true -> edit PVC size upward).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Pod -> PVC -> PV -> real disk; StorageClass creates PVs on demand.
+- RWO = one node; RWX needs file storage.
+- reclaimPolicy Delete removes the disk; use Retain for important data.
+- WaitForFirstConsumer avoids zone mismatches.

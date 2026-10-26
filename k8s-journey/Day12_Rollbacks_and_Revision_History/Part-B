@@ -1,0 +1,121 @@
+==================================================================
+DAY 12 - PART B: LAB
+Break a rollout, then roll back
+Time: 75-90 minutes
+==================================================================
+
+cd ~/k8s-journey/manifests/week2
+
+
+STEP 1: Start clean with change-cause annotations
+-------------------------------------------------
+k apply -f deploy-web.yaml          # from Day 11 (nginx:1.27 if you updated it)
+k annotate deploy/web kubernetes.io/change-cause="initial deploy" --overwrite
+k rollout history deploy/web
+
+
+STEP 2: Build up some history
+-----------------------------
+k set image deploy/web nginx=nginx:1.26
+k annotate deploy/web kubernetes.io/change-cause="downgrade to 1.26" --overwrite
+k rollout status deploy/web
+
+k set image deploy/web nginx=nginx:1.27-alpine
+k annotate deploy/web kubernetes.io/change-cause="switch to alpine" --overwrite
+k rollout status deploy/web
+
+k rollout history deploy/web
+k get rs -l app=web
+
+You should see 3 revisions and 3 ReplicaSets (two at 0 replicas).
+
+
+STEP 3: Inspect a revision
+--------------------------
+k rollout history deploy/web --revision=2
+k get rs -l app=web -o custom-columns=NAME:.metadata.name,REV:.metadata.annotations.deployment\\.kubernetes\\.io/revision,IMAGE:.spec.template.spec.containers[0].image,READY:.status.readyReplicas
+
+
+STEP 4: Deploy a broken version
+-------------------------------
+Terminal 2: k get pods -l app=web -w
+
+k set image deploy/web nginx=nginx:9.9.9-doesnotexist
+k annotate deploy/web kubernetes.io/change-cause="bad tag" --overwrite
+k rollout status deploy/web --timeout=60s
+echo "exit code: $?"         # non-zero = failed
+
+k get pods -l app=web
+
+Observe: ONE new pod is in ImagePullBackOff, the 3 old pods are still
+Running (maxUnavailable: 0 protects you). Users would not notice.
+
+k describe deploy web | grep -A5 Conditions
+
+
+STEP 5: Roll back
+-----------------
+k rollout undo deploy/web
+k rollout status deploy/web
+k get pods -l app=web
+k rollout history deploy/web
+
+Notice: the revision you rolled back to got a new number, and the
+bad revision is still listed.
+
+
+STEP 6: Roll back to a specific revision
+----------------------------------------
+k rollout history deploy/web
+Pick the "downgrade to 1.26" revision number (N):
+  k rollout undo deploy/web --to-revision=N
+  k get deploy web -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+
+
+STEP 7: Progress deadline
+-------------------------
+k patch deploy web -p '{"spec":{"progressDeadlineSeconds":30}}'
+k set image deploy/web nginx=nginx:broken-again
+sleep 40
+k get deploy web -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+
+Expect: Progressing=False ProgressDeadlineExceeded
+k rollout undo deploy/web
+
+
+STEP 8: Limit the history
+-------------------------
+k patch deploy web -p '{"spec":{"revisionHistoryLimit":2}}'
+k set image deploy/web nginx=nginx:1.27
+k rollout status deploy/web
+k get rs -l app=web           # only 2 old ReplicaSets kept
+k rollout history deploy/web
+
+
+STEP 9: Write a safe-deploy script
+----------------------------------
+vi ~/k8s-journey/manifests/week2/safe-deploy.sh
+
+#!/bin/bash
+# usage: ./safe-deploy.sh nginx:1.26
+set -u
+IMAGE=$1
+kubectl set image deploy/web nginx=$IMAGE
+kubectl annotate deploy/web kubernetes.io/change-cause="deploy $IMAGE" --overwrite
+if ! kubectl rollout status deploy/web --timeout=60s; then
+  echo "Rollout failed, rolling back"
+  kubectl rollout undo deploy/web
+  kubectl rollout status deploy/web
+  exit 1
+fi
+echo "Deployed $IMAGE"
+
+chmod +x safe-deploy.sh
+./safe-deploy.sh nginx:1.26
+./safe-deploy.sh nginx:nope
+
+
+STEP 10: Clean up and commit
+----------------------------
+k delete deploy web
+cd ~/k8s-journey && git add . && git commit -m "day12: rollbacks"

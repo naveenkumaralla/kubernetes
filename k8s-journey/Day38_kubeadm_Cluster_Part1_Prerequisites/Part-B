@@ -1,0 +1,163 @@
+==================================================================
+DAY 38 - PART B: LAB
+Prepare 3 VMs for kubeadm
+Time: 90-120 minutes
+==================================================================
+
+Below, commands marked [ALL] run on cp1, worker1 and worker2.
+Pick ONE of the OS sections (RHEL/Rocky or Ubuntu).
+Set the version once (use the version you want to START from; Day 40
+upgrades one minor version up):
+  K8S=v1.33
+
+
+STEP 1: Create the VMs
+----------------------
+Example with Multipass (Ubuntu):
+  multipass launch 24.04 --name cp1     --cpus 2 --memory 3G --disk 20G
+  multipass launch 24.04 --name worker1 --cpus 2 --memory 2G --disk 20G
+  multipass launch 24.04 --name worker2 --cpus 2 --memory 2G --disk 20G
+  multipass list
+  multipass shell cp1
+Or create 3 Rocky 9 VMs in VirtualBox/KVM with a bridged or host-only
++ NAT network. Note their IPs.
+
+
+STEP 2: Hostnames and /etc/hosts [ALL]
+--------------------------------------
+sudo hostnamectl set-hostname cp1        # worker1 / worker2 on the others
+cat <<EOF | sudo tee -a /etc/hosts
+<IP-cp1>      cp1
+<IP-worker1>  worker1
+<IP-worker2>  worker2
+EOF
+ping -c1 worker1 ; ping -c1 cp1
+sudo cat /sys/class/dmi/id/product_uuid     # must differ per VM
+
+
+STEP 3: Swap off [ALL]
+----------------------
+sudo swapoff -a
+sudo sed -i '/\sswap\s/ s/^/#/' /etc/fstab
+free -h            # Swap: 0B
+(Ubuntu with zram/swapfile: also "sudo systemctl mask swap.target"
+ or remove /swap.img entry.)
+
+
+STEP 4: Kernel modules and sysctls [ALL]
+----------------------------------------
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+sudo modprobe overlay
+sudo modprobe br_netfilter
+
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+sudo sysctl --system
+lsmod | grep -E "overlay|br_netfilter"
+sysctl net.ipv4.ip_forward net.bridge.bridge-nf-call-iptables
+
+
+STEP 5 (RHEL/Rocky only): SELinux and firewall [ALL]
+----------------------------------------------------
+sudo setenforce 0
+sudo sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
+For a lab, simplest:
+  sudo systemctl disable --now firewalld
+Or open ports (control plane example):
+  sudo firewall-cmd --permanent --add-port={6443,2379-2380,10250,10257,10259,179,4789,5473}/tcp
+  sudo firewall-cmd --permanent --add-port=4789/udp
+  sudo firewall-cmd --reload
+  (workers: 10250, 30000-32767/tcp, 179, 4789/udp, 5473)
+
+
+STEP 6: Install containerd [ALL]
+--------------------------------
+Ubuntu:
+  sudo apt-get update
+  sudo apt-get install -y containerd
+
+RHEL/Rocky (containerd.io from Docker's repo):
+  sudo dnf install -y dnf-plugins-core
+  sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+  sudo dnf install -y containerd.io
+
+Configure systemd cgroups:
+  sudo mkdir -p /etc/containerd
+  containerd config default | sudo tee /etc/containerd/config.toml >/dev/null
+  sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+  grep -n SystemdCgroup /etc/containerd/config.toml     # must show true
+  sudo systemctl enable --now containerd
+  sudo systemctl restart containerd
+  systemctl status containerd --no-pager | head -5
+
+If grep shows nothing, your containerd version uses a different
+layout; find the runc options section in config.toml and add
+"SystemdCgroup = true" under it (see containerd docs for your version).
+Also make sure the "cri" plugin is NOT listed in disabled_plugins.
+
+
+STEP 7: Install kubeadm, kubelet, kubectl [ALL]
+-----------------------------------------------
+Ubuntu:
+  sudo apt-get install -y apt-transport-https ca-certificates curl gpg
+  sudo mkdir -p -m 755 /etc/apt/keyrings
+  curl -fsSL https://pkgs.k8s.io/core:/stable:/$K8S/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/$K8S/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+  sudo apt-get update
+  sudo apt-get install -y kubelet kubeadm kubectl
+  sudo apt-mark hold kubelet kubeadm kubectl
+
+RHEL/Rocky:
+  cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://pkgs.k8s.io/core:/stable:/$K8S/rpm/
+enabled=1
+gpgcheck=1
+gpgkey=https://pkgs.k8s.io/core:/stable:/$K8S/rpm/repodata/repomd.xml.key
+exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+EOF
+  sudo dnf install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
+
+Both:
+  sudo systemctl enable --now kubelet
+  kubeadm version ; kubelet --version ; kubectl version --client
+
+The kubelet will restart every few seconds until kubeadm init/join:
+that's expected.
+  systemctl status kubelet --no-pager | head -5
+
+
+STEP 8: crictl config [ALL]
+---------------------------
+cat <<EOF | sudo tee /etc/crictl.yaml
+runtime-endpoint: unix:///run/containerd/containerd.sock
+image-endpoint: unix:///run/containerd/containerd.sock
+EOF
+sudo crictl info | head -20
+sudo crictl images
+
+
+STEP 9: Pre-flight check
+------------------------
+On cp1:
+  sudo kubeadm config images pull
+  sudo crictl images              # apiserver, etcd, scheduler ...
+  sudo kubeadm init phase preflight
+
+Fix every [ERROR] before tomorrow. Note any [WARNING].
+
+
+STEP 10: Snapshot your VMs
+--------------------------
+Take a VM snapshot now ("prereqs-done"). If tomorrow goes wrong you can
+restore instead of starting over.
+Save every command you ran into
+  ~/k8s-journey/kubeadm/node-prep.sh
+and commit.

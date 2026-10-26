@@ -1,0 +1,82 @@
+==================================================================
+DAY 23 - PART A: THEORY
+Secrets: How They Work and How to Use Them Safely
+Time: 30-40 minutes
+==================================================================
+
+1. WHAT IS A SECRET?
+--------------------
+Like a ConfigMap, but for sensitive data: passwords, tokens, keys,
+certificates. Used the same three ways (env, envFrom, volume).
+
+Differences from ConfigMaps:
+  - values are stored base64-encoded in the "data" field
+  - mounted as tmpfs (RAM) on the node, never written to node disk
+  - only sent to nodes that run pods needing them
+  - separate RBAC permissions (you can allow ConfigMaps but not
+    Secrets)
+
+
+2. BASE64 IS NOT ENCRYPTION
+---------------------------
+  echo -n 's3cret' | base64      -> czNjcmV0
+  echo czNjcmV0 | base64 -d      -> s3cret
+
+Anyone who can "get secrets" in a namespace can read every password.
+Base64 just allows binary data in YAML.
+
+In YAML you can use stringData to write plain text; Kubernetes encodes
+it for you:
+  stringData:
+    password: s3cret
+
+
+3. SECRET TYPES
+---------------
+  Opaque                           generic (default)
+  kubernetes.io/tls                tls.crt + tls.key (Ingress, Day 19)
+  kubernetes.io/dockerconfigjson   registry login (imagePullSecrets)
+  kubernetes.io/service-account-token  legacy SA tokens
+  kubernetes.io/basic-auth, ssh-auth
+
+
+4. WHERE SECRETS ARE STORED
+---------------------------
+In etcd. By default UNENCRYPTED on disk. Production clusters enable
+"encryption at rest" (EncryptionConfiguration, often with a cloud KMS).
+Managed clouds offer this as a setting (Week 7).
+
+
+5. BEST PRACTICES
+-----------------
+- Restrict "get/list secrets" with RBAC (Week 5).
+- Enable encryption at rest.
+- Never commit plain Secret YAML to Git. Options:
+    Sealed Secrets   encrypt with a cluster key; safe in Git
+    SOPS             encrypt files with KMS/age keys
+    External Secrets Operator   sync from AWS Secrets Manager, Azure
+                     Key Vault, Vault, GCP Secret Manager (most common
+                     in cloud)
+    Secrets Store CSI driver    mount secrets directly from a vault
+- Prefer mounting as files over env vars (env vars leak into logs,
+  crash dumps, "env" output, child processes).
+- Rotate secrets; use immutable versioned secrets if they rarely change.
+- In the cloud, avoid secrets entirely for cloud access: use workload
+  identity (Week 7).
+
+
+6. PRIVATE REGISTRY PULLS
+-------------------------
+  k create secret docker-registry regcred \
+    --docker-server=docker.io --docker-username=U --docker-password=TOKEN
+  spec:
+    imagePullSecrets:
+    - name: regcred
+(or attach it to the namespace's ServiceAccount)
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Secrets = ConfigMaps for sensitive data; base64, not encryption.
+- Protect with RBAC + encryption at rest + an external secret store.
+- Files over env vars.

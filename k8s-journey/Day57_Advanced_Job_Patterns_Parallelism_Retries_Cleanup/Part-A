@@ -1,0 +1,81 @@
+==================================================================
+DAY 57 - PART A: THEORY
+Week 9 (Optional): Extending Kubernetes
+Advanced Job Patterns: Parallelism, Retries, Failure Policies, Cleanup
+Time: 40 minutes
+==================================================================
+
+Week 9 runs on kind (kind-lab). It goes beyond the 8-week plan:
+backend job patterns, queue workers, CNI and CSI deep dives, CRDs,
+operators, and policy engines.
+
+
+1. RECAP (DAY 27)
+-----------------
+completions, parallelism, backoffLimit, activeDeadlineSeconds,
+ttlSecondsAfterFinished, restartPolicy Never/OnFailure, CronJobs.
+
+
+2. INDEXED JOBS AND PER-INDEX RETRIES
+-------------------------------------
+completionMode: Indexed gives each pod JOB_COMPLETION_INDEX.
+Real uses: process file shard N, render frame N, train fold N.
+
+  backoffLimitPerIndex: 2     each index retried up to 2 times
+  maxFailedIndexes: 3         give up when more than 3 indexes failed
+One bad shard no longer burns the whole Job's retry budget.
+status.failedIndexes / completedIndexes show exactly which failed.
+
+
+3. POD FAILURE POLICY
+---------------------
+Decide what a failure MEANS:
+  podFailurePolicy:
+    rules:
+    - action: FailJob            # a real bug: stop immediately
+      onExitCodes:
+        containerName: worker
+        operator: In
+        values: [42]
+    - action: Ignore             # node was drained/preempted: not
+      onPodConditions:           # the app's fault, don't count it
+      - type: DisruptionTarget
+Actions: FailJob, Ignore, Count (default), FailIndex.
+Requires restartPolicy: Never.
+
+
+4. SUCCESS POLICY
+-----------------
+successPolicy (newer): mark an Indexed Job successful when certain
+indexes succeed (e.g. "index 0 is the leader; when it finishes, done").
+
+
+5. SUSPEND AND QUEUEING
+-----------------------
+  spec.suspend: true    create the Job without starting pods; set to
+                        false to start. Batch queue systems (Kueue)
+                        use this to admit jobs when quota allows.
+
+
+6. WORK-QUEUE PATTERN
+---------------------
+Fixed completions are awkward when work arrives continuously. Instead:
+  producer pushes tasks to a queue (Redis list, RabbitMQ, SQS, Kafka)
+  N worker pods pop tasks until the queue is empty (Job) or forever
+  (Deployment), and an autoscaler sizes N by queue length (Day 58).
+Workers must be idempotent and acknowledge only after success.
+
+
+7. CLEANUP
+----------
+  ttlSecondsAfterFinished on every Job (or the cluster fills with
+  completed pods); CronJob history limits; owner references so
+  deleting a parent removes children.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Indexed + backoffLimitPerIndex for sharded work.
+- podFailurePolicy separates app bugs from infrastructure noise.
+- suspend lets a queue system decide when Jobs run.
+- Work queues + autoscaling for continuous background work.

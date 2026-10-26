@@ -1,0 +1,94 @@
+==================================================================
+DAY 36 - PART A: THEORY
+Control Plane Internals: The API Server and etcd
+Time: 45 minutes
+==================================================================
+
+1. THE API SERVER REQUEST PIPELINE
+----------------------------------
+Every request (kubectl, kubelet, controllers, operators) passes:
+
+  HTTPS request
+    -> 1. AUTHENTICATION    who? (x509 cert, bearer token, OIDC,
+                             ServiceAccount token, webhook)
+    -> 2. AUTHORIZATION     allowed? (Node authorizer, RBAC, webhook)
+    -> 3. MUTATING ADMISSION   may CHANGE the object
+                             (defaults, LimitRange, ServiceAccount,
+                             webhooks like Istio sidecar injection)
+    -> 4. SCHEMA VALIDATION
+    -> 5. VALIDATING ADMISSION may REJECT
+                             (ResourceQuota, PodSecurity, Kyverno/OPA
+                             webhooks, ValidatingAdmissionPolicy)
+    -> 6. PERSIST TO etcd
+    -> 7. notify WATCHERS (scheduler, controllers, kubelets)
+
+You saw admission in action: LimitRange injected defaults (Day 29),
+PodSecurity and ResourceQuota rejected pods (Days 29, 34).
+
+
+2. API STRUCTURE
+----------------
+  /api/v1/...                       core group (pods, services ...)
+  /apis/apps/v1/...                 named groups (deployments ...)
+  /apis/<group>/<version>/namespaces/<ns>/<resource>/<name>
+
+Versions: v1alpha1 (experimental) -> v1beta1 -> v1 (stable).
+Watches: clients hold a long connection and receive ADDED / MODIFIED /
+DELETED events. resourceVersion lets them resume. This is how all
+components stay in sync without polling.
+
+
+3. etcd
+-------
+- Distributed, consistent key-value store (Raft consensus).
+- Keys like /registry/pods/default/web, values in protobuf.
+- Only the API server talks to etcd (with client certificates).
+- Cluster sizes: 1 (lab), 3 or 5 (production). Needs a MAJORITY
+  (quorum) to accept writes: 3 nodes tolerate 1 failure, 5 tolerate 2.
+- Sensitive to disk latency: use fast SSDs.
+- Back it up! Losing etcd = losing the cluster's state (Day 40).
+
+
+4. HOW THE CONTROL PLANE RUNS (kubeadm / kind)
+----------------------------------------------
+As STATIC PODS: the kubelet on the control-plane node reads YAML files
+in /etc/kubernetes/manifests and runs them directly, without the API
+server (it can't depend on itself).
+  kube-apiserver.yaml, etcd.yaml, kube-scheduler.yaml,
+  kube-controller-manager.yaml
+Edit a file -> kubelet restarts that component.
+In the API you see "mirror pods" (read-only reflections).
+
+
+5. CERTIFICATES (PKI)
+---------------------
+/etc/kubernetes/pki holds the cluster CA and certs:
+  ca.crt/key            cluster CA (signs apiserver, kubelet clients ...)
+  apiserver.crt         API server's serving cert
+  apiserver-kubelet-client.crt
+  etcd/ca.crt, etcd/server.crt ...   separate etcd CA
+  front-proxy-*         for API aggregation
+  sa.key/sa.pub         sign ServiceAccount tokens
+kubeadm certs are valid 1 year; "kubeadm certs check-expiration" and
+cluster upgrades renew them.
+
+Kubeconfig files in /etc/kubernetes:
+  admin.conf, super-admin.conf, controller-manager.conf,
+  scheduler.conf, kubelet.conf
+
+
+6. HIGH AVAILABILITY
+--------------------
+Production: 3 control-plane nodes behind a load balancer;
+API servers are stateless (all active); scheduler and controller
+manager run active/standby via LEADER ELECTION (Lease objects in
+kube-system); etcd stacked on the same nodes or external.
+Managed clouds hide all of this (Week 7).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- authn -> authz -> mutating admission -> validation -> validating
+  admission -> etcd -> watchers.
+- etcd needs quorum and backups.
+- Control plane = static pods from /etc/kubernetes/manifests.

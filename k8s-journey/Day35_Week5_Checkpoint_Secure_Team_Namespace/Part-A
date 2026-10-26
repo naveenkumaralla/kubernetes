@@ -1,0 +1,41 @@
+==================================================================
+DAY 35 - PART A: THEORY (REVISION)
+Week 5 Review: Resources, Health, Scheduling, Security
+Time: 30 minutes
+==================================================================
+
+Answer without looking:
+
+1. Requests vs limits; CPU vs memory behaviour; QoS classes.
+2. LimitRange vs ResourceQuota.
+3. OOMKilled vs Evicted; exit code 137.
+4. Three probes and what failure does for each.
+5. nodeSelector, affinity, anti-affinity, taints/tolerations,
+   DaemonSet.
+6. RBAC objects; user vs ServiceAccount; k auth can-i.
+7. NetworkPolicy default deny + DNS; PSA levels.
+
+
+A "PRODUCTION-READY POD" CHECKLIST
+----------------------------------
+[ ] requests set (cpu + memory), memory limit set
+[ ] readiness + liveness (+ startup if slow) probes
+[ ] preStop delay for graceful shutdown
+[ ] runs as non-root, drop ALL caps, no privilege escalation,
+    read-only root FS where possible
+[ ] own ServiceAccount, token only if needed, least-privilege RBAC
+[ ] NetworkPolicy allowing only required traffic
+[ ] replicas spread across nodes/zones (anti-affinity/topology spread)
+[ ] PodDisruptionBudget
+[ ] image pinned to a version tag (or digest)
+
+
+TODAY'S PROJECT
+---------------
+Build a "team namespace" a platform team would hand to a dev team:
+  - ResourceQuota + LimitRange
+  - a read-only user and an edit-capable CI ServiceAccount
+  - Pod Security "restricted"
+  - default-deny NetworkPolicy + DNS + only the needed flows
+  - a hardened app that passes all of the above
+Prove each control works.

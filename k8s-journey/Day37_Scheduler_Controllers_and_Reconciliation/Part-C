@@ -1,0 +1,28 @@
+==================================================================
+DAY 37 - PART C: CHECKPOINT
+==================================================================
+
+1. What does "level-triggered" mean, and how did Step 6 show it?
+Ans:
+
+
+2. List the controllers involved in creating a Deployment's pods, in
+   order.
+Ans:
+
+
+3. What still worked when the scheduler was down? What didn't?
+Ans:
+
+
+4. How long did it take for pods to move off the stopped node? Why
+   that long?
+Ans:
+
+
+5. What does --cascade=orphan do?
+Ans:
+
+
+6. Paste the FailedScheduling message from Step 8 and explain it.
+Ans:

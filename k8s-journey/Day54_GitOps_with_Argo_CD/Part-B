@@ -1,0 +1,145 @@
+==================================================================
+DAY 54 - PART B: LAB
+Deploy from Git with Argo CD
+Time: 90-120 minutes
+==================================================================
+
+STEP 0: Push your repo to GitHub
+--------------------------------
+Create a PUBLIC repo on GitHub named k8s-journey (public keeps the lab
+simple; private repos need credentials in Argo CD).
+Make sure no secrets/keys are committed (check .gitignore, git log).
+  cd ~/k8s-journey
+  git remote add origin https://github.com/<you>/k8s-journey.git
+  git branch -M main
+  git push -u origin main
+
+
+STEP 1: Install Argo CD
+-----------------------
+k create ns argocd
+k apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+k get pods -n argocd -w
+
+CLI:
+  curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+  sudo install -m 555 argocd /usr/local/bin/argocd ; rm argocd
+
+UI:
+  k port-forward svc/argocd-server -n argocd 8080:443 &
+  PASS=$(k -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d); echo $PASS
+  Open https://localhost:8080 (accept the self-signed cert), user admin.
+  argocd login localhost:8080 --username admin --password $PASS --insecure
+
+
+STEP 2: Your first Application
+------------------------------
+mkdir -p ~/k8s-journey/week8/argocd && cd $_
+vi app-dev.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/<you>/k8s-journey.git
+    targetRevision: main
+    path: week8/kustomize/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kz-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+
+k apply -f app-dev.yaml
+argocd app list
+argocd app get myapp-dev
+k get all -n kz-dev
+In the UI: the tree of Deployment -> ReplicaSet -> Pods.
+
+
+STEP 3: Change Git, watch the cluster follow
+--------------------------------------------
+Edit week8/kustomize/overlays/dev/kustomization.yaml: add
+  replicas:
+  - name: myapp
+    count: 3
+git commit -am "dev: 3 replicas" && git push
+Argo CD polls every ~3 minutes (or click Refresh / argocd app sync myapp-dev):
+  k get pods -n kz-dev -w
+
+
+STEP 4: Self-heal (drift)
+-------------------------
+k scale deploy myapp -n kz-dev --replicas=1
+k get pods -n kz-dev -w        # back to 3 within seconds
+k delete svc myapp -n kz-dev
+k get svc -n kz-dev            # recreated
+The cluster obeys Git, not kubectl.
+
+
+STEP 5: Prune
+-------------
+Remove service.yaml from base/kustomization.yaml resources, commit,
+push, sync: the Service is deleted from the cluster. Revert it:
+  git revert HEAD && git push
+
+
+STEP 6: Rollback = git revert
+-----------------------------
+Change GREETING in the dev overlay, push, check the app. Then:
+  git log --oneline -3
+  git revert <commit> && git push
+argocd app history myapp-dev
+
+
+STEP 7: A Helm-based Application (your chart from Day 51)
+---------------------------------------------------------
+vi app-helm.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp-helm
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/<you>/k8s-journey.git
+    targetRevision: main
+    path: week8/charts/myapp
+    helm:
+      valueFiles:
+      - values.yaml
+      parameters:
+      - name: greeting
+        value: "Deployed by Argo CD from a Helm chart"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: helm-argo
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+
+k apply -f app-helm.yaml ; argocd app get myapp-helm
+
+
+STEP 8: Manage the Applications from Git too (app of apps)
+----------------------------------------------------------
+Commit app-dev.yaml and app-helm.yaml into week8/argocd/apps/ and
+create ONE root Application pointing at that folder. From now on,
+adding an Application = adding a file in Git.
+
+
+STEP 9: Clean up and commit
+---------------------------
+argocd app delete myapp-helm --yes
+(keep myapp-dev for tomorrow)
+cd ~/k8s-journey && git add . && git commit -m "day54: argocd" && git push

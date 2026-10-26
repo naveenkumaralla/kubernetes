@@ -1,0 +1,101 @@
+==================================================================
+DAY 8 - PART A: THEORY
+YAML Basics and the Declarative Model
+Time: 30-40 minutes
+==================================================================
+
+1. WHY YAML?
+------------
+Last week you used "k run" (an IMPERATIVE command: "do this now").
+Real teams describe objects in YAML files, store them in Git, and
+apply them. The file IS the desired state. This is DECLARATIVE.
+
+  Imperative:   k run web --image=nginx
+  Declarative:  k apply -f web.yaml   (file says what should exist)
+
+Declarative wins because files are repeatable, reviewable, and
+version-controlled. "k apply" can be run 100 times safely.
+
+
+2. YAML IN 5 RULES
+------------------
+1) key: value pairs              name: web
+2) Indentation = nesting. SPACES only, never tabs. Use 2 spaces.
+3) A list item starts with "- "
+       containers:
+       - name: web
+         image: nginx
+4) Strings usually need no quotes. Quote things that look like other
+   types: "yes", "no", "on", "1.20", "08".
+5) Multiple documents in one file are separated by a line with ---
+
+Most YAML errors are indentation errors. Check with:
+   k apply -f file.yaml --dry-run=client
+
+
+3. THE FOUR REQUIRED TOP-LEVEL FIELDS
+-------------------------------------
+Every Kubernetes object has:
+
+  apiVersion:  which API group/version  (v1, apps/v1, batch/v1 ...)
+  kind:        type of object           (Pod, Deployment, Service ...)
+  metadata:    name, namespace, labels, annotations
+  spec:        what you want (desired state)
+
+(status is added by Kubernetes; you never write it.)
+
+Example:
+
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: web
+    labels:
+      app: web
+  spec:
+    containers:
+    - name: web
+      image: nginx:1.27
+      ports:
+      - containerPort: 80
+
+
+4. HOW TO KNOW WHICH apiVersion?
+--------------------------------
+  k api-resources            shows NAME, SHORTNAMES, APIVERSION, KIND
+  k explain pod              docs for the object
+  k explain pod.spec.containers.ports    drill into any field
+  k explain deployment --recursive | less   all fields
+
+You do not need to memorise YAML. You need to know how to generate it
+and how to look up fields.
+
+
+5. GENERATE YAML INSTEAD OF TYPING IT FROM ZERO
+-----------------------------------------------
+  k run web --image=nginx --dry-run=client -o yaml > pod.yaml
+  k create deployment web --image=nginx --dry-run=client -o yaml > deploy.yaml
+
+--dry-run=client means "build the object locally, do not send it".
+-o yaml prints it. This trick is used daily (and in the CKA exam).
+
+
+6. create vs apply vs replace vs delete
+---------------------------------------
+  k create -f x.yaml    create; FAILS if it already exists
+  k apply -f x.yaml     create OR update to match the file (use this)
+  k replace -f x.yaml   replace the whole object
+  k delete -f x.yaml    delete what the file describes
+  k diff -f x.yaml      show what apply would change
+
+Some pod fields cannot be changed after creation (for example the
+container ports or most of spec). Pods are mostly immutable: you delete
+and recreate. Deployments handle this for you (Day 11).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- apiVersion, kind, metadata, spec.
+- Spaces only, 2-space indentation, lists start with "- ".
+- Generate with --dry-run=client -o yaml; look up with k explain.
+- Use k apply for everything.

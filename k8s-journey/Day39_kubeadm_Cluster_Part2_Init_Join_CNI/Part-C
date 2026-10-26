@@ -1,0 +1,31 @@
+==================================================================
+DAY 39 - PART C: CHECKPOINT
+==================================================================
+
+1. List six phases of kubeadm init.
+Ans:
+
+
+2. Why was cp1 NotReady right after init?
+Ans:
+
+
+3. What are the token and the CA cert hash used for in "kubeadm join"?
+Ans:
+
+
+4. How do you get a new join command after the token expires?
+Ans:
+
+
+5. Why must --pod-network-cidr match the CNI configuration?
+Ans:
+
+
+6. What files exist in /etc/kubernetes on a worker vs the control
+   plane?
+Ans:
+
+
+7. What does admin.conf contain and why must it be protected?
+Ans:

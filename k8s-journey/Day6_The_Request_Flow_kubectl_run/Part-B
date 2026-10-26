@@ -1,0 +1,137 @@
+==================================================================
+DAY 6 - PART B: LAB
+Watch the request flow happen
+Time: 90 minutes
+==================================================================
+
+STEP 1: Open a watcher in a second terminal
+-------------------------------------------
+Terminal 2:
+  k get pods -w
+
+Leave it running for the whole lab.
+
+
+STEP 2: Create a pod and watch the states
+-----------------------------------------
+Terminal 1:
+  k run web --image=nginx
+
+In terminal 2 you should see:
+  web   0/1   Pending             -> stored, not yet scheduled
+  web   0/1   ContainerCreating   -> scheduled, kubelet pulling image
+  web   1/1   Running
+
+
+STEP 3: Read the story in events
+--------------------------------
+k describe pod web
+
+Scroll to "Events" at the bottom. Match each line to the 8 steps:
+  Scheduled   default-scheduler   Successfully assigned default/web to lab-worker
+  Pulling     kubelet             Pulling image "nginx"
+  Pulled      kubelet             Successfully pulled image
+  Created     kubelet             Created container web
+  Started     kubelet             Started container web
+
+Notice WHO reports each event (scheduler vs kubelet).
+
+k get events --sort-by=.metadata.creationTimestamp
+
+
+STEP 4: Find where it landed and its IP
+---------------------------------------
+k get pod web -o wide
+
+Note the NODE and IP columns.
+
+
+STEP 5: See the raw API calls kubectl makes
+-------------------------------------------
+k run web2 --image=nginx -v=6
+
+Look for lines like:
+  POST https://127.0.0.1:xxxxx/api/v1/namespaces/default/pods 201 Created
+
+Try "k get pods -v=8" to also see the response body.
+
+
+STEP 6: View the full object (spec vs status)
+---------------------------------------------
+k get pod web -o yaml | less
+
+Find:
+  spec.nodeName                 (written by the scheduler)
+  spec.containers[0].image      (written by you)
+  status.phase                  (written by the kubelet)
+  status.podIP
+  status.containerStatuses
+
+Show only some fields:
+  k get pod web -o jsonpath='{.spec.nodeName}{"\n"}{.status.podIP}{"\n"}'
+
+
+STEP 7: Logs and exec
+---------------------
+k logs web
+k exec -it web -- bash
+  curl -s localhost | head -5
+  head /etc/nginx/nginx.conf
+  hostname          # same as the pod name
+  exit
+
+
+STEP 8: Reach the pod from your machine
+---------------------------------------
+k port-forward pod/web 8080:80
+
+Terminal 3:
+  curl localhost:8080
+
+Then check the logs:
+  k logs web --tail=3
+
+Stop port-forward with Ctrl+C.
+
+
+STEP 9: Look at it from the node's side
+---------------------------------------
+NODE=$(k get pod web -o jsonpath='{.spec.nodeName}')
+echo $NODE
+docker exec $NODE crictl ps
+docker exec $NODE crictl pods
+
+You see the nginx container running under containerd on that node,
+plus a "pause" container that holds the pod's network namespace.
+Same process + namespaces story as Day 2:
+
+docker exec $NODE ps aux | grep "nginx: master"
+
+
+STEP 10: Delete and watch
+-------------------------
+k delete pod web
+k get pods
+
+The pod is gone and NOTHING brings it back. No controller manages a
+bare pod. (Deployments fix this in Week 2.)
+
+
+STEP 11: Cause and read a failure
+---------------------------------
+k run broken --image=nginx:doesnotexist
+k get pods                # ErrImagePull, then ImagePullBackOff
+k describe pod broken     # read Events: "manifest unknown" / "not found"
+
+Fix it without deleting the pod:
+  k set image pod/broken broken=nginx:latest
+  k get pods -w           # becomes Running
+
+Clean up:
+  k delete pod broken web2
+
+
+STEP 12: Save your notes
+------------------------
+In Part-C write the 8 steps from memory, then commit:
+  cd ~/k8s-journey && git add . && git commit -m "day6: request flow"

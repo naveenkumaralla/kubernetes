@@ -1,0 +1,140 @@
+==================================================================
+DAY 58 - PART B: LAB
+Scale a Redis worker from 0 to N and back
+Time: 90 minutes
+==================================================================
+
+mkdir -p ~/k8s-journey/week9/keda && cd $_
+
+
+STEP 1: Install KEDA
+--------------------
+helm repo add kedacore https://kedacore.github.io/charts && helm repo update
+helm install keda kedacore/keda -n keda --create-namespace
+k get pods -n keda
+k get crd | grep keda
+
+
+STEP 2: Redis and a worker Deployment
+-------------------------------------
+k create ns queue ; kubens queue
+k create deploy redis --image=redis:7-alpine --port=6379
+k expose deploy redis --port=6379
+
+vi worker.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+spec:
+  replicas: 0
+  selector:
+    matchLabels: {app: worker}
+  template:
+    metadata:
+      labels: {app: worker}
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: worker
+        image: redis:7-alpine
+        command:
+        - sh
+        - -c
+        - |
+          trap 'echo "SIGTERM: finishing and exiting"; exit 0' TERM
+          while true; do
+            T=$(redis-cli -h redis BLPOP jobs 5 | tail -1)
+            [ -n "$T" ] && echo "$(hostname) processing $T" && sleep 2
+          done
+        resources:
+          requests: {cpu: 20m, memory: 16Mi}
+
+k apply -f worker.yaml
+
+
+STEP 3: ScaledObject
+--------------------
+vi scaledobject.yaml
+
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  pollingInterval: 5
+  cooldownPeriod: 30
+  triggers:
+  - type: redis
+    metadata:
+      address: redis.queue.svc.cluster.local:6379
+      listName: jobs
+      listLength: "5"
+
+k apply -f scaledobject.yaml
+k get scaledobject
+k get hpa                 # keda-hpa-worker created by KEDA
+k get deploy worker       # 0 replicas
+
+
+STEP 4: Push work and watch
+---------------------------
+Terminal 2: k get deploy worker -w
+Terminal 3: watch -n2 "kubectl exec -n queue deploy/redis -- redis-cli LLEN jobs"
+
+k exec deploy/redis -- sh -c 'for i in $(seq 1 100); do redis-cli RPUSH jobs "task-$i" >/dev/null; done; redis-cli LLEN jobs'
+
+Workers go 0 -> 1 -> up to 10 as the queue grows, then drain it,
+and ~30 s after it's empty scale back to 0.
+k logs -l app=worker --prefix --tail=3
+
+
+STEP 5: Tune and observe
+------------------------
+Change listLength to "20" and repeat: fewer workers, slower drain.
+Push 1000 tasks: does it cap at maxReplicaCount 10?
+k describe scaledobject worker | tail -15
+
+
+STEP 6: ScaledJob (one Job per batch)
+-------------------------------------
+vi scaledjob.yaml
+
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: batch-worker
+spec:
+  jobTargetRef:
+    template:
+      spec:
+        restartPolicy: Never
+        containers:
+        - name: w
+          image: redis:7-alpine
+          command: ["sh", "-c", "for i in 1 2 3 4 5; do T=$(redis-cli -h redis LPOP batch); [ -n \"$T\" ] && echo processing $T; done"]
+  pollingInterval: 5
+  maxReplicaCount: 5
+  successfulJobsHistoryLimit: 3
+  triggers:
+  - type: redis
+    metadata:
+      address: redis.queue.svc.cluster.local:6379
+      listName: batch
+      listLength: "5"
+
+k apply -f scaledjob.yaml
+k exec deploy/redis -- sh -c 'for i in $(seq 1 30); do redis-cli RPUSH batch "b-$i" >/dev/null; done'
+k get jobs -w
+
+
+STEP 7: Clean up and commit
+---------------------------
+kubens default ; k delete ns queue
+(keep KEDA or: helm uninstall keda -n keda)
+cd ~/k8s-journey && git add . && git commit -m "day58: keda"

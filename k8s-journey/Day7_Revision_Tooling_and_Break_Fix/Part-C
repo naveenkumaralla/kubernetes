@@ -1,0 +1,33 @@
+==================================================================
+DAY 7 - PART C: WEEK 1 SELF-TEST
+Answer without looking. 4 out of 5 correct + rebuilding the cluster
+without help = ready for Week 2.
+==================================================================
+
+1. What does "docker run -d -p 8080:80 nginx" do, flag by flag?
+Ans:
+
+
+2. Where do you look on the host to see a container's memory limit?
+Ans:
+
+
+3. Why should "COPY requirements.txt" come before "COPY app.py"?
+Ans:
+
+
+4. What happens, step by step, between "k run" and a running container?
+Ans:
+
+
+5. A pod is stuck in Pending. What is your first command, and what
+   are two common reasons?
+Ans:
+
+
+6. Drill results: write the status, reason, and fix for d1, d2, d3.
+Ans:
+
+
+7. Mistakes log: write one error you hit this week and how you fixed it.
+Ans:

@@ -1,0 +1,30 @@
+==================================================================
+DAY 38 - PART C: CHECKPOINT
+==================================================================
+
+1. Why must swap be off (or explicitly configured)?
+Ans:
+
+
+2. What do the br_netfilter module and ip_forward sysctl enable?
+Ans:
+
+
+3. Why must containerd use SystemdCgroup = true?
+Ans:
+
+
+4. Why do we "hold" kubeadm, kubelet and kubectl?
+Ans:
+
+
+5. Which ports does the control plane need open?
+Ans:
+
+
+6. Why was the kubelet restarting in a loop after install?
+Ans:
+
+
+7. What did "kubeadm init phase preflight" report on your machine?
+Ans:

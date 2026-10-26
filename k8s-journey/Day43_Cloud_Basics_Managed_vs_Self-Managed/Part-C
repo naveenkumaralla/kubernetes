@@ -1,0 +1,26 @@
+==================================================================
+DAY 43 - PART C: CHECKPOINT
+==================================================================
+
+1. What does the cloud provider manage in EKS, and what do you manage?
+Ans:
+
+
+2. Public vs private subnet: which holds worker nodes and why?
+Ans:
+
+
+3. Why can pods run out of IPs on EKS with the VPC CNI?
+Ans:
+
+
+4. Cluster access IAM vs workload identity: explain the difference.
+Ans:
+
+
+5. Your hourly cost estimate for the lab cluster:
+Ans:
+
+
+6. Explain each section of cluster.yaml (iam, addons, managedNodeGroups).
+Ans:

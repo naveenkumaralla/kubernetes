@@ -1,0 +1,66 @@
+==================================================================
+DAY 49 - PART A: THEORY
+Cost, Cleanup, and Running EKS in Production
+Time: 45 minutes
+==================================================================
+
+1. WHERE THE MONEY GOES
+-----------------------
+  Control plane fee         fixed per cluster per hour
+  Nodes (EC2)               usually the biggest part
+  Load balancers            per LB per hour + traffic (LCUs)
+  NAT gateways              per hour + per GB processed (surprisingly
+                            expensive with lots of image pulls/egress)
+  EBS volumes / snapshots   per GB-month, even when detached
+  Data transfer             cross-AZ traffic, internet egress
+  Logs/metrics              CloudWatch ingestion and storage
+  Extended-support versions much higher control plane fee
+
+
+2. COST CONTROLS
+----------------
+- Right-size requests (Week 5) -> fewer nodes
+- Autoscaling + Spot + Karpenter consolidation
+- One shared ingress/ALB instead of many LoadBalancer Services
+- VPC endpoints for ECR/S3 to cut NAT traffic
+- Delete unused PVs, snapshots, LBs, old ECR images (lifecycle rules)
+- Tag everything; use Cost Explorer; tools like Kubecost/OpenCost
+- Non-prod clusters: scale to zero at night, or create on demand
+
+
+3. PRODUCTION CHECKLIST FOR A MANAGED CLUSTER
+---------------------------------------------
+Cluster
+  [ ] infrastructure as code (Terraform/OpenTofu, eksctl config in Git)
+  [ ] supported Kubernetes version + upgrade plan every ~4-6 months
+  [ ] private API endpoint or restricted public CIDRs
+  [ ] secrets encryption with KMS
+  [ ] control plane logs (audit) enabled
+  [ ] nodes in private subnets, 3 AZs, IMDSv2 hop limit 1
+Access
+  [ ] SSO-based human access, least privilege, no shared admin
+  [ ] workload identity for every app needing cloud APIs
+Workloads
+  [ ] requests/limits, probes, PDBs, topology spread across zones
+  [ ] Pod Security restricted + policy engine (Kyverno/Gatekeeper)
+  [ ] NetworkPolicies (VPC CNI network policy or Cilium/Calico)
+  [ ] images from a private registry, scanned, pinned by tag/digest
+Operations
+  [ ] GitOps deployments (Week 8)
+  [ ] metrics, logs, alerts (Week 8)
+  [ ] backups: Velero for cluster objects, DB backups, tested restores
+  [ ] cost monitoring and budgets
+
+
+4. MULTI-CLUSTER / ENVIRONMENT STRATEGY
+---------------------------------------
+Common: separate clusters per environment (dev/stage/prod) and often
+per region; namespaces per team inside. Blue/green CLUSTER upgrades
+are an alternative to in-place upgrades.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Nodes, NAT, LBs, storage, and data transfer drive cost.
+- Delete in the right order; verify with the billing page.
+- A production cluster is code + security + observability + backups.

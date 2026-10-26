@@ -1,0 +1,67 @@
+==================================================================
+DAY 7 - PART A: THEORY (REVISION)
+Week 1 Review
+Time: 30 minutes
+==================================================================
+
+Answer each of these out loud or in writing WITHOUT looking. Then check
+your notes from Days 1-6 and correct yourself.
+
+1. VM vs container: three differences.
+2. The three Linux features behind containers.
+3. What each Dockerfile instruction does:
+   FROM, WORKDIR, COPY, RUN, ENV, EXPOSE, CMD, ENTRYPOINT
+4. Why one Docker host is not enough for production.
+5. The control plane components and what each one does.
+6. The node components and what each one does.
+7. The 8-step "kubectl run" flow.
+
+
+DRAWING EXERCISE
+----------------
+On paper, draw:
+  - the control plane on the left (API server, etcd, scheduler,
+    controller manager)
+  - two worker nodes on the right (kubelet, containerd, kube-proxy,
+    pods)
+  - arrows showing who talks to whom (remember: everything goes
+    through the API server; only the API server touches etcd)
+
+Compare with the diagram in Day5 Part-A and fix any gaps.
+
+
+QUICK REFERENCE: WEEK 1 COMMANDS
+--------------------------------
+Docker
+  docker run -d --name X -p H:C IMAGE    run in background, publish port
+  docker ps / ps -a                      list containers
+  docker logs -f X                       follow logs
+  docker exec -it X bash                 shell inside
+  docker build -t name:tag .             build image
+  docker push user/name:tag              push to registry
+  docker network create / volume create
+
+Kubernetes
+  kind create/delete cluster --name lab
+  k get nodes / pods -A / events
+  k describe pod X
+  k logs X
+  k exec -it X -- bash
+  k port-forward pod/X 8080:80
+  k get pod X -o yaml / -o wide
+
+
+TROUBLESHOOTING ORDER (USE IT FROM NOW ON)
+------------------------------------------
+  1. k get pods            -> what is the status?
+  2. k describe pod X      -> read Events at the bottom
+  3. k logs X              -> what did the app say?
+  4. k logs X --previous   -> logs of the crashed container
+  5. k get events          -> anything else happening?
+
+
+TOOLS YOU INSTALL TODAY
+-----------------------
+k9s       Terminal UI for Kubernetes. Fast for browsing and debugging.
+kubectx   Switch between clusters (contexts) quickly.
+kubens    Switch the default namespace quickly (used in Week 2).

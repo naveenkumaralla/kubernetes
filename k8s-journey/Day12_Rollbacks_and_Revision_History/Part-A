@@ -1,0 +1,75 @@
+==================================================================
+DAY 12 - PART A: THEORY
+Rollbacks and Revision History
+Time: 30-40 minutes
+==================================================================
+
+1. EVERY ROLLOUT IS A REVISION
+------------------------------
+Each new pod template = a new ReplicaSet = a new revision number.
+The revision is stored on the ReplicaSet as the annotation
+  deployment.kubernetes.io/revision: "3"
+
+  k rollout history deploy/web
+  k rollout history deploy/web --revision=2    (show that template)
+
+
+2. CHANGE-CAUSE
+---------------
+The CHANGE-CAUSE column is empty unless you set the annotation
+"kubernetes.io/change-cause" on the Deployment:
+
+  k annotate deploy/web kubernetes.io/change-cause="upgrade to 1.27"
+
+(The old --record flag is deprecated. In GitOps setups the Git commit
+history plays this role.)
+
+
+3. ROLLBACK
+-----------
+  k rollout undo deploy/web                  previous revision
+  k rollout undo deploy/web --to-revision=2  a specific one
+
+Rollback is just another rollout: Kubernetes scales the old
+ReplicaSet back up and the current one down, using the same rolling
+strategy. The rolled-back revision gets a NEW revision number (the old
+number disappears from history).
+
+
+4. HOW MANY REVISIONS ARE KEPT?
+-------------------------------
+  spec.revisionHistoryLimit: 10   (default)
+Old ReplicaSets beyond this are deleted, and you can't roll back to
+them.
+
+
+5. FAILED ROLLOUTS
+------------------
+A bad image tag causes new pods to hit ImagePullBackOff. Because of
+maxUnavailable, the rollout STOPS and old pods keep serving traffic.
+The Deployment does not roll back automatically; it waits.
+
+  spec.progressDeadlineSeconds: 600  (default)
+After this, the Deployment condition "Progressing" becomes False with
+reason ProgressDeadlineExceeded. CI/CD tools watch this and trigger
+the rollback.
+
+"k rollout status" exits with an error in that case: perfect for
+scripts and pipelines.
+
+
+6. A SAFE UPDATE ROUTINE
+------------------------
+  1. Change the YAML (image tag, never "latest")
+  2. k diff -f deploy.yaml
+  3. k apply -f deploy.yaml
+  4. k rollout status deploy/web --timeout=120s
+  5. If it fails: k rollout undo deploy/web, then investigate
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Revisions live on ReplicaSets.
+- undo = roll forward to an old template (gets a new number).
+- A bad rollout stalls safely; it does not undo itself.
+- Use rollout status in scripts; it fails on a stuck rollout.

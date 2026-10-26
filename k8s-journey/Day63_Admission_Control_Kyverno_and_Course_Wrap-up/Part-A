@@ -1,0 +1,91 @@
+==================================================================
+DAY 63 - PART A: THEORY
+Admission Control with Kyverno (and OPA Gatekeeper), Course Wrap-up
+Time: 40 minutes
+==================================================================
+
+1. POLICY AS CODE
+-----------------
+RBAC decides WHO can create a Deployment. It can't say WHAT the
+Deployment must look like. Admission policies can:
+  - every pod must have resource limits
+  - images only from our registry; no ":latest"
+  - every namespace gets a default-deny NetworkPolicy
+  - add team labels automatically
+They run as admission webhooks (Day 36 pipeline) and can VALIDATE
+(reject/audit), MUTATE (change), GENERATE (create other objects), and
+verify image signatures.
+
+
+2. THE OPTIONS
+--------------
+  Kyverno          policies written in YAML (Kubernetes-native),
+                   validate/mutate/generate/verifyImages, policy reports
+  OPA Gatekeeper   policies in Rego (a policy language), ConstraintTemplate
+                   + Constraint CRDs, very flexible
+  ValidatingAdmissionPolicy   BUILT INTO Kubernetes (GA in 1.30), rules
+                   written in CEL; no extra components. (Mutating
+                   admission policies are arriving in newer versions.)
+  Pod Security Admission      built-in, fixed profiles (Day 34)
+
+
+3. A KYVERNO POLICY
+-------------------
+  apiVersion: kyverno.io/v1
+  kind: ClusterPolicy
+  metadata:
+    name: require-team-label
+  spec:
+    background: true            # also report on existing resources
+    rules:
+    - name: check-team
+      match:
+        any:
+        - resources:
+            kinds: [Deployment]
+      validate:
+        failureAction: Enforce  # or Audit (report only)
+        message: "label 'team' is required"
+        pattern:
+          metadata:
+            labels:
+              team: "?*"
+(Older Kyverno versions set validationFailureAction at spec level.)
+
+Roll out new policies in Audit mode first, check PolicyReports, then
+switch to Enforce.
+
+
+4. COURSE WRAP-UP: WHAT YOU NOW KNOW
+------------------------------------
+  Week 1  containers, Linux internals, Kubernetes architecture
+  Week 2  Pods, ReplicaSets, Deployments, rollouts, namespaces
+  Week 3  Services, DNS, Ingress, CNI
+  Week 4  ConfigMaps, Secrets, volumes, PV/PVC, StatefulSets, Jobs
+  Week 5  resources, probes, scheduling, RBAC, NetworkPolicy, PSA
+  Week 6  control plane internals, kubeadm, etcd, upgrades,
+          troubleshooting
+  Week 7  EKS: VPC, LBs, EBS, workload identity, autoscaling, cost
+  Week 8  Helm, Kustomize, cert-manager, Prometheus, Argo CD, CI/CD
+  Week 9  advanced jobs, KEDA, Calico/Cilium, CSI, CRDs, operators,
+          policies
+
+
+5. WHAT NEXT
+------------
+  Certifications: KCNA (concepts) -> CKA (admin, hands-on) ->
+                  CKAD (developer) -> CKS (security)
+                  Practise with killer.sh (included with exam).
+  Go deeper:      service mesh (Istio ambient / Linkerd), Gateway API,
+                  Crossplane, Karpenter, Velero, OpenTelemetry,
+                  writing operators with kubebuilder.
+  Practise:       rebuild the capstone from scratch without notes;
+                  help others; read Kubernetes release notes each
+                  version.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Admission policies enforce WHAT objects look like.
+- Kyverno = YAML policies; Gatekeeper = Rego; VAP = built-in CEL.
+- Audit first, then Enforce.

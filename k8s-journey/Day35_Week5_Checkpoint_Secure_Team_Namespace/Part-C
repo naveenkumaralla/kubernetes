@@ -1,0 +1,29 @@
+==================================================================
+DAY 35 - PART C: WEEK 5 SELF-TEST
+==================================================================
+
+1. Paste your final app.yaml container section and explain each
+   security setting.
+Ans:
+
+
+2. Why did the client pod need a securityContext too?
+Ans:
+
+
+3. Why did you need BOTH an ingress rule on web and an egress rule on
+   client?
+Ans:
+
+
+4. Which objects would a platform team template for every new team?
+Ans:
+
+
+5. A pod in this namespace is Pending. List three Week 5 reasons that
+   could cause it.
+Ans:
+
+
+6. Mistakes log: one error from this week and its fix.
+Ans:

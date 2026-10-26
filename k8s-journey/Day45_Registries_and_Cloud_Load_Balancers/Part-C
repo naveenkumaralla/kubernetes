@@ -1,0 +1,28 @@
+==================================================================
+DAY 45 - PART C: CHECKPOINT
+==================================================================
+
+1. Why didn't the pods need an imagePullSecret to pull from ECR?
+Ans:
+
+
+2. What did the first LoadBalancer Service create in AWS? What were
+   its targets?
+Ans:
+
+
+3. Instance targets vs IP targets: what's the difference?
+Ans:
+
+
+4. What did the Ingress with class "alb" create?
+Ans:
+
+
+5. Why must you delete LoadBalancer Services before the cluster?
+Ans:
+
+
+6. How many vulnerabilities did ECR scanning find in your image?
+   How would you reduce them?
+Ans:

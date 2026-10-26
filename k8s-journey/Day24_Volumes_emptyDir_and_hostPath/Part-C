@@ -1,0 +1,26 @@
+==================================================================
+DAY 24 - PART C: CHECKPOINT
+==================================================================
+
+1. What are the two parts of declaring a volume in a pod?
+Ans:
+
+
+2. emptyDir: does it survive a container restart? A pod deletion?
+Ans:
+
+
+3. Why did the hostPath file sometimes start over?
+Ans:
+
+
+4. Why is hostPath a security risk? Who legitimately uses it?
+Ans:
+
+
+5. What happens when a pod exceeds its emptyDir sizeLimit?
+Ans:
+
+
+6. What is ephemeral storage, and what uses it?
+Ans:

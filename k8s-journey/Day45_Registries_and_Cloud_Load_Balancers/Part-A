@@ -1,0 +1,72 @@
+==================================================================
+DAY 45 - PART A: THEORY
+Cloud Registries and Cloud Load Balancers
+Time: 40 minutes
+==================================================================
+
+1. CLOUD CONTAINER REGISTRIES
+-----------------------------
+  AWS ECR, Azure ACR, Google Artifact Registry.
+Why not Docker Hub? Private by default, close to your nodes (fast,
+no rate limits), IAM-based access (nodes pull with their IAM role, no
+imagePullSecrets), vulnerability scanning, lifecycle policies.
+
+ECR image name:
+  <account-id>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>
+Login for docker/podman uses a 12-hour token:
+  aws ecr get-login-password | docker login --username AWS --password-stdin <registry>
+EKS nodes' IAM role has AmazonEC2ContainerRegistryReadOnly, so pulls
+just work.
+
+
+2. Service type: LoadBalancer IN THE CLOUD
+------------------------------------------
+The cloud controller (or AWS Load Balancer Controller) watches
+LoadBalancer Services and creates a real LB:
+
+  Internet -> cloud LB (public subnets) -> NodePort on nodes
+           -> kube-proxy -> pods
+  or, with "IP target" mode -> directly to pod IPs (VPC CNI)
+
+On EKS:
+  Default (no extra controller)    Classic LB / NLB via the built-in
+                                   cloud provider (legacy)
+  AWS Load Balancer Controller     NLB for Services, ALB for Ingress;
+                                   the recommended way
+Annotations choose details, e.g.
+  service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+  service.beta.kubernetes.io/aws-load-balancer-type: external   (LB controller)
+
+
+3. INGRESS IN THE CLOUD
+-----------------------
+Option A: one LoadBalancer Service in front of an in-cluster ingress
+          controller (Traefik, NGINX ...) -> 1 cloud LB for all apps.
+Option B: AWS LB Controller turns each Ingress (class "alb") into an
+          Application Load Balancer; group several Ingresses on one
+          ALB with the group.name annotation.
+GKE: Ingress -> Google HTTP(S) LB by default. AKS: Application
+Gateway for Containers or an in-cluster controller.
+
+
+4. DNS AND TLS IN THE CLOUD
+---------------------------
+external-dns can create Route 53/Azure DNS/Cloud DNS records from
+Services/Ingresses. TLS: cert-manager (Week 8) or cloud certificates
+(AWS ACM on the ALB/NLB).
+
+
+5. COST NOTE
+------------
+Every LoadBalancer Service = one cloud LB billed hourly + traffic.
+Deleting the cluster WITHOUT deleting LB Services first can leave
+orphaned load balancers (and block VPC deletion). Always delete
+LoadBalancer Services and Ingresses before the cluster.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Push images to the cloud registry; nodes pull with IAM.
+- LoadBalancer Service -> real cloud LB; Ingress -> ALB (with the
+  controller) or LB + in-cluster controller.
+- Delete LBs before deleting the cluster.

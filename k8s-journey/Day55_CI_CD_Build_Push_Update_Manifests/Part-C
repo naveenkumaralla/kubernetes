@@ -1,0 +1,26 @@
+==================================================================
+DAY 55 - PART C: CHECKPOINT
+==================================================================
+
+1. Draw the full flow from "git push" to "new pod running".
+Ans:
+
+
+2. Why tag images with the git SHA?
+Ans:
+
+
+3. Why "[skip ci]" in the bot's commit message?
+Ans:
+
+
+4. How is prod promotion controlled in your setup?
+Ans:
+
+
+5. What happened when the test failed?
+Ans:
+
+
+6. How would you avoid storing cloud keys in GitHub secrets?
+Ans:

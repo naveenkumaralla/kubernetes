@@ -1,0 +1,114 @@
+==================================================================
+DAY 20 - PART B: LAB
+Inspect a CNI, then build a cluster with Calico
+Time: 90 minutes
+==================================================================
+
+STEP 1: Inspect kindnet on a node
+---------------------------------
+k get ds -n kube-system
+k get pods -n kube-system -l app=kindnet -o wide
+
+docker exec lab-worker ls /etc/cni/net.d/
+docker exec lab-worker cat /etc/cni/net.d/10-kindnet.conflist
+docker exec lab-worker ls /opt/cni/bin/
+
+In the conflist find: "type" (ptp / host-local), and the "ranges"
+(this node's PodCIDR).
+
+
+STEP 2: See the CNI being called
+--------------------------------
+k run cnitest --image=nginx:1.27
+k describe pod cnitest | grep -i -E "sandbox|network"
+docker exec $(k get pod cnitest -o jsonpath='{.spec.nodeName}') \
+  journalctl -u containerd --no-pager | grep -i cni | tail -5
+k delete pod cnitest
+
+
+STEP 3: Create a second cluster WITHOUT a CNI
+---------------------------------------------
+cd ~/k8s-journey/kind
+vi kind-calico.yaml
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true
+  podSubnet: 192.168.0.0/16
+nodes:
+- role: control-plane
+- role: worker
+- role: worker
+
+kind create cluster --name calico --config kind-calico.yaml
+k get nodes                 # NotReady!
+k describe node calico-worker | grep -A3 -i "ready"
+k get pods -n kube-system   # coredns Pending
+
+Without a CNI, nodes are NotReady and pods can't get IPs.
+(Your kubectl context switched to kind-calico. Check: kubectx)
+
+
+STEP 4: Install Calico
+----------------------
+Find the current Calico version at
+https://docs.tigera.io/calico/latest/getting-started/kubernetes/quickstart
+and set it (example below; use the latest shown there):
+
+CALICO=v3.30.3
+k create -f https://raw.githubusercontent.com/projectcalico/calico/$CALICO/manifests/operator-crds.yaml
+k create -f https://raw.githubusercontent.com/projectcalico/calico/$CALICO/manifests/tigera-operator.yaml
+k create -f https://raw.githubusercontent.com/projectcalico/calico/$CALICO/manifests/custom-resources.yaml
+
+(If operator-crds.yaml returns 404 for your version, skip that line;
+older versions ship the CRDs inside tigera-operator.yaml.)
+
+k get pods -n calico-system -w      # wait until all Running (2-5 min)
+k get nodes                         # Ready
+
+
+STEP 5: Compare with kindnet
+----------------------------
+k create deploy net --image=nginx:1.27 --replicas=4
+k get pods -o wide                  # IPs from 192.168.x.x
+
+docker exec calico-worker ip route | head
+docker exec calico-worker ls /etc/cni/net.d/
+docker exec calico-worker ip -d link show | grep -E "vxlan|tunl"
+
+Note the cali* interfaces and routes to other nodes' blocks
+(via vxlan.calico or tunl0 depending on the mode).
+
+
+STEP 6: Calico's own objects
+----------------------------
+k get ippools.crd.projectcalico.org -o yaml | grep -E "cidr|encapsulation|natOutgoing"
+k get installation default -o yaml | grep -A8 calicoNetwork
+
+Keep this cluster: Week 5 Day 6 (NetworkPolicy) uses a CNI that
+enforces policies.
+
+
+STEP 7 (OPTIONAL): Cilium
+-------------------------
+Cilium has a CLI that installs it:
+  CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+  curl -L --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz
+  sudo tar xzvf cilium-linux-amd64.tar.gz -C /usr/local/bin
+Create a third kind cluster with disableDefaultCNI: true, then:
+  cilium install
+  cilium status --wait
+  cilium connectivity test     (takes a while; very educational)
+Delete it afterwards to save RAM: kind delete cluster --name <name>
+
+
+STEP 8: Switch back and clean up
+--------------------------------
+k delete deploy net
+kubectx kind-lab
+k get nodes
+To free memory you can delete the calico cluster and recreate it in
+Week 5:
+  kind delete cluster --name calico
+cd ~/k8s-journey && git add . && git commit -m "day20: cni"

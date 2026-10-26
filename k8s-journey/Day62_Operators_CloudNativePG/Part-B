@@ -1,0 +1,115 @@
+==================================================================
+DAY 62 - PART B: LAB
+A highly available Postgres with automatic failover
+Time: 90-120 minutes
+==================================================================
+
+mkdir -p ~/k8s-journey/week9/operator && cd $_
+
+
+STEP 1: Install the operator
+----------------------------
+helm repo add cnpg https://cloudnative-pg.github.io/charts && helm repo update
+helm upgrade --install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace
+k get pods -n cnpg-system
+k get crd | grep cnpg
+
+
+STEP 2: A 3-instance cluster
+----------------------------
+k create ns db
+vi pg-cluster.yaml
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+  namespace: db
+spec:
+  instances: 3
+  storage:
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 512Mi}
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+
+k apply -f pg-cluster.yaml
+k get cluster -n db -w          # watch it go to "Cluster in healthy state"
+k get pods,pvc,svc,secret -n db
+
+Note: pg-1, pg-2, pg-3 (pods managed directly, not a StatefulSet),
+Services pg-rw / pg-ro / pg-r, Secret pg-app.
+
+
+STEP 3: Who is primary?
+-----------------------
+k get cluster pg -n db -o jsonpath='{.status.currentPrimary}{"\n"}'
+k get pods -n db -L role,cnpg.io/instanceRole
+
+
+STEP 4: Connect as the app
+--------------------------
+PASS=$(k get secret pg-app -n db -o jsonpath='{.data.password}' | base64 -d)
+k run psql -n db --rm -it --image=postgres:16 --env=PGPASSWORD=$PASS -- \
+  psql -h pg-rw -U app app -c "create table t(x text); insert into t values ('before failover'); select * from t;"
+
+Read from replicas:
+k run psql -n db --rm -it --image=postgres:16 --env=PGPASSWORD=$PASS -- \
+  psql -h pg-ro -U app app -c "select * from t; select pg_is_in_recovery();"
+(pg_is_in_recovery = t means you're on a replica)
+
+Write to a replica fails:
+k run psql -n db --rm -it --image=postgres:16 --env=PGPASSWORD=$PASS -- \
+  psql -h pg-ro -U app app -c "insert into t values ('x');"
+
+
+STEP 5: Kill the primary (automatic failover)
+---------------------------------------------
+Terminal 2: k get pods -n db -L cnpg.io/instanceRole -w
+PRIMARY=$(k get cluster pg -n db -o jsonpath='{.status.currentPrimary}')
+k delete pod $PRIMARY -n db
+Within seconds a replica is promoted; the old primary comes back as a
+replica. pg-rw now points to the new primary automatically.
+
+k get cluster pg -n db -o jsonpath='{.status.currentPrimary}{"\n"}'
+k run psql -n db --rm -it --image=postgres:16 --env=PGPASSWORD=$PASS -- \
+  psql -h pg-rw -U app app -c "insert into t values ('after failover'); select * from t;"
+k describe cluster pg -n db | tail -15
+
+
+STEP 6: Scale and switchover
+----------------------------
+k patch cluster pg -n db --type=merge -p '{"spec":{"instances":4}}'
+k get pods -n db -w
+(Optional: install the kubectl-cnpg plugin and run
+ "kubectl cnpg status pg -n db" and "kubectl cnpg promote pg pg-2 -n db"
+ for a planned switchover.)
+k patch cluster pg -n db --type=merge -p '{"spec":{"instances":3}}'
+
+
+STEP 7: What the operator created
+---------------------------------
+k get all,pvc,secret,cm,pdb -n db -l cnpg.io/cluster=pg
+k get pdb -n db          # protects instances during drains
+k get pod $(k get cluster pg -n db -o jsonpath='{.status.currentPrimary}') -n db -o yaml | grep -A3 ownerReferences
+
+
+STEP 8 (READ): Backups
+----------------------
+In production, configure backups to object storage (S3 with Pod
+Identity/IRSA, or MinIO in a lab) via the Barman Cloud plugin or the
+cluster's backup section (depending on your CNPG version), plus a
+ScheduledBackup resource. Restoring = a new Cluster with
+bootstrap.recovery from that backup, including point-in-time
+recovery. Read the CloudNativePG backup docs for your version.
+
+
+STEP 9: Clean up and commit
+---------------------------
+k delete ns db
+helm uninstall cnpg -n cnpg-system ; k delete ns cnpg-system
+cd ~/k8s-journey && git add . && git commit -m "day62: operators"

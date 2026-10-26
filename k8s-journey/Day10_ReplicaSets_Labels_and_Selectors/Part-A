@@ -1,0 +1,92 @@
+==================================================================
+DAY 10 - PART A: THEORY
+ReplicaSets, Labels, and Selectors
+Time: 30-40 minutes
+==================================================================
+
+1. THE PROBLEM
+--------------
+A bare pod dies and stays dead. We want "always keep 3 copies
+running". That is the job of a REPLICASET.
+
+
+2. LABELS
+---------
+Labels are key/value tags attached to any object:
+  metadata:
+    labels:
+      app: web
+      env: prod
+      tier: frontend
+
+They mean nothing to Kubernetes by themselves. They become powerful
+because other objects SELECT by them. Labels are how Kubernetes glues
+things together (ReplicaSet -> pods, Service -> pods, NetworkPolicy ->
+pods, nodeSelector -> nodes).
+
+Annotations are also key/value but are NOT used for selection; they
+store extra info (build ID, owner, tool config).
+
+
+3. SELECTORS
+------------
+Equality-based:   app=web       env!=prod
+Set-based:        env in (dev,test)    tier notin (db)    !legacy
+
+  k get pods -l app=web
+  k get pods -l 'env in (dev,test)'
+  k get pods -L app,env      (show labels as columns)
+
+
+4. REPLICASET
+-------------
+A ReplicaSet has three key parts:
+
+  apiVersion: apps/v1
+  kind: ReplicaSet
+  metadata:
+    name: web-rs
+  spec:
+    replicas: 3              <- how many
+    selector:                <- which pods count as "mine"
+      matchLabels:
+        app: web
+    template:                <- how to create a new pod
+      metadata:
+        labels:
+          app: web           <- MUST match the selector
+      spec:
+        containers:
+        - name: web
+          image: nginx:1.27
+
+The ReplicaSet controller loop:
+  count pods matching selector  ->  compare with replicas  ->
+  create from template or delete extras.
+
+
+5. IMPORTANT BEHAVIOURS
+-----------------------
+- The ReplicaSet owns its pods (see metadata.ownerReferences on a pod).
+- If you change a pod's label so it no longer matches, the ReplicaSet
+  "lets it go" (orphans it) and creates a replacement.
+- If you create a bare pod WITH matching labels, the ReplicaSet may
+  adopt it and delete one to stay at the desired count.
+- Changing the template (e.g. image) does NOT update existing pods.
+  Only NEW pods get the new template. That is why we use Deployments
+  for updates (Day 11).
+
+
+6. WHERE YOU SEE REPLICASETS IN REAL LIFE
+-----------------------------------------
+You almost never create ReplicaSets directly. Deployments create and
+manage them for you. But understanding them explains how Deployments
+do rolling updates.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Labels tag, selectors pick. They connect everything in Kubernetes.
+- ReplicaSet = replicas + selector + template.
+- Template labels must match the selector.
+- ReplicaSets don't update existing pods; Deployments do.

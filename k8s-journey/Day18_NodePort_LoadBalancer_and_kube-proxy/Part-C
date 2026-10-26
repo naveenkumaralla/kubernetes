@@ -1,0 +1,32 @@
+==================================================================
+DAY 18 - PART C: CHECKPOINT
+==================================================================
+
+1. What port range do NodePorts use, and on which nodes is the port
+   opened?
+Ans:
+
+
+2. A LoadBalancer Service shows EXTERNAL-IP <pending>. Why, in kind?
+Ans:
+
+
+3. Which chain in iptables receives NodePort traffic, and where does
+   it lead?
+Ans:
+
+
+4. How does iptables pick a backend pod?
+Ans:
+
+
+5. externalTrafficPolicy Local vs Cluster: one advantage of each.
+Ans:
+
+
+6. When would you use port-forward, NodePort, and LoadBalancer?
+Ans:
+
+
+7. Is kube-proxy in the path of every packet? Explain.
+Ans:

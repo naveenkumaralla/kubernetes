@@ -1,0 +1,41 @@
+==================================================================
+DAY 21 - PART A: THEORY (REVISION)
+Week 3 Review: Networking
+Time: 30 minutes
+==================================================================
+
+Answer without looking:
+
+1. The 3 rules of Kubernetes networking.
+2. Why pod IPs are unreliable and what solves it.
+3. ClusterIP, NodePort, LoadBalancer, ExternalName, headless.
+4. port vs targetPort vs nodePort.
+5. How a ClusterIP is implemented (who, what rules).
+6. Full DNS name of a Service; why short names work.
+7. Ingress vs ingress controller; host vs path routing.
+8. What a CNI plugin does; overlay vs routed.
+
+
+THE FULL REQUEST PATH (MEMORISE THIS)
+-------------------------------------
+ browser
+   -> DNS: shop.local -> load balancer / node IP
+   -> LB / NodePort / hostPort
+   -> ingress controller pod (matches host + path)
+   -> Service "frontend" (ClusterIP, kube-proxy DNAT)
+   -> frontend pod
+        -> calls http://backend (CoreDNS -> ClusterIP)
+        -> Service "backend" (kube-proxy DNAT)
+        -> backend pod
+
+
+NETWORK TROUBLESHOOTING ORDER
+-----------------------------
+1. Pods Running and READY?          k get pods -o wide
+2. Service selects them?            k get endpointslices ... (not empty?)
+3. Port numbers right?              port / targetPort / containerPort
+4. DNS resolves?                    nslookup from a debug pod
+5. Works by ClusterIP but not name? -> DNS. By pod IP but not
+                                       ClusterIP? -> kube-proxy/Service.
+6. Ingress rules + class correct?   k describe ingress; controller logs
+7. NetworkPolicy blocking? (Week 5)

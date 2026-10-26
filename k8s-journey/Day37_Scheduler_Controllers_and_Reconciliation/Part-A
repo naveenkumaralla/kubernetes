@@ -1,0 +1,85 @@
+==================================================================
+DAY 37 - PART A: THEORY
+Scheduler and Controller Manager: Reconciliation Loops
+Time: 40 minutes
+==================================================================
+
+1. THE CONTROLLER PATTERN
+-------------------------
+A controller is a loop:
+  for ever:
+      desired = read spec from API (via a watch + local cache)
+      actual  = observe the world (pods, nodes, cloud resources)
+      if different: take ONE step toward desired, write status
+It is LEVEL-triggered: it reacts to the current state, not to a list
+of past events. If it crashes and restarts, it just looks again.
+
+
+2. CONTROLLERS INSIDE kube-controller-manager
+---------------------------------------------
+  Deployment controller     Deployment -> ReplicaSets
+  ReplicaSet controller     ReplicaSet -> Pods
+  StatefulSet, DaemonSet, Job, CronJob controllers
+  Node controller           marks nodes NotReady/Unknown, taints them,
+                            triggers eviction after timeout
+  EndpointSlice controller  Service + ready pods -> EndpointSlices
+  ServiceAccount, Namespace (deletes contents), PV binder,
+  Garbage collector         deletes objects whose owner is gone
+                            (ownerReferences, cascading delete)
+  ResourceQuota, HPA (Week 7), CertificateSigningRequest ...
+
+
+3. A CHAIN OF CONTROLLERS (k create deploy web --replicas=2)
+-----------------------------------------------------------
+  you  -> Deployment saved
+  Deployment controller  -> creates ReplicaSet
+  ReplicaSet controller  -> creates 2 Pods (no node)
+  Scheduler              -> sets nodeName on each
+  kubelet                -> runs containers, sets status
+  EndpointSlice ctrl     -> adds ready pod IPs to Services
+Each step is a separate controller reacting to the previous one's
+output. Nobody orchestrates the whole flow.
+
+
+4. THE SCHEDULER IN DETAIL
+--------------------------
+Scheduling framework, plugins at each stage:
+  PreFilter/Filter  NodeResourcesFit, NodeAffinity, TaintToleration,
+                    PodTopologySpread, VolumeBinding, NodePorts ...
+  Score             NodeResourcesBalancedAllocation, ImageLocality,
+                    InterPodAffinity, TaintToleration ...
+  Bind              write the Binding
+If no node fits: pod stays Pending, event "FailedScheduling" with a
+summary like "0/3 nodes are available: 1 node(s) had untolerated
+taint ..., 2 Insufficient cpu". Preemption may evict lower-priority
+pods to make room.
+
+You can run several schedulers; a pod chooses with spec.schedulerName.
+
+
+5. OWNER REFERENCES AND GARBAGE COLLECTION
+------------------------------------------
+Pod.metadata.ownerReferences -> ReplicaSet -> Deployment.
+Deleting the Deployment:
+  --cascade=background (default)  owner deleted, GC removes children
+  --cascade=foreground            children first, then owner
+  --cascade=orphan                children left alone
+
+
+6. NODE FAILURE TIMELINE (defaults)
+-----------------------------------
+  kubelet stops heartbeating (Lease renew every 10 s)
+  ~40 s  node controller marks node NotReady/Unknown, adds
+         node.kubernetes.io/unreachable:NoExecute taint
+  +300 s pods' default toleration expires -> pods evicted ->
+         controllers create replacements on healthy nodes
+So a dead node's pods move after ~5-6 minutes by default (tunable via
+tolerationSeconds per pod).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Controllers are level-triggered loops that close the gap.
+- Work happens through a chain of independent controllers.
+- FailedScheduling events explain Pending pods.
+- Dead node -> pods evicted after ~5 minutes.

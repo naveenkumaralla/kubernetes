@@ -1,0 +1,136 @@
+==================================================================
+DAY 60 - PART B: LAB
+Inspect a CSI driver, then add RWX storage with NFS
+Time: 90-120 minutes
+==================================================================
+
+kubectx kind-lab
+mkdir -p ~/k8s-journey/week9/csi && cd $_
+
+
+STEP 1: kind's provisioner is NOT a CSI driver
+----------------------------------------------
+k get csidriver                 # probably empty
+k get sc standard -o jsonpath='{.provisioner}{"\n"}'   # rancher.io/local-path
+The local-path provisioner is an "external provisioner" that creates
+hostPath-style PVs; no CSI attach/mount steps.
+
+
+STEP 2: Run an NFS server inside the cluster (lab only)
+-------------------------------------------------------
+Follow the csi-driver-nfs example (it provides a ready NFS server
+manifest):
+k create ns nfs
+k apply -n nfs -f https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/deploy/example/nfs-provisioner/nfs-server.yaml
+k get pods,svc -n nfs
+(The example creates Service "nfs-server". If the namespace inside the
+manifest differs, follow the manifest.)
+
+
+STEP 3: Install csi-driver-nfs
+------------------------------
+helm repo add csi-driver-nfs https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+helm repo update
+helm install csi-driver-nfs csi-driver-nfs/csi-driver-nfs -n kube-system
+k get pods -n kube-system -l app.kubernetes.io/instance=csi-driver-nfs -o wide
+
+Inspect the pieces:
+k get deploy -n kube-system | grep nfs        # controller
+k get ds -n kube-system | grep nfs            # node plugin
+k get pod -n kube-system -l app=csi-nfs-controller -o jsonpath='{.items[0].spec.containers[*].name}{"\n"}'
+   -> csi-provisioner, csi-snapshotter?, liveness-probe, nfs ...
+k get pod -n kube-system -l app=csi-nfs-node -o jsonpath='{.items[0].spec.containers[*].name}{"\n"}'
+   -> liveness-probe, node-driver-registrar, nfs
+k get csidriver nfs.csi.k8s.io -o yaml | grep -A6 spec
+k get csinode -o yaml | grep -B2 -A4 nfs.csi.k8s.io
+
+
+STEP 4: StorageClass and an RWX PVC
+-----------------------------------
+vi sc-nfs.yaml
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-csi
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: nfs-server.nfs.svc.cluster.local
+  share: /
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+mountOptions:
+- nfsvers=4.1
+
+vi pvc-rwx.yaml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: nfs-csi
+  resources:
+    requests:
+      storage: 1Gi
+
+k apply -f sc-nfs.yaml -f pvc-rwx.yaml
+k get pvc shared                # Bound immediately
+k get pv -o yaml | grep -A5 "csi:"
+k logs -n kube-system -l app=csi-nfs-controller -c csi-provisioner --tail=5
+
+
+STEP 5: Many pods, many nodes, one volume
+-----------------------------------------
+vi deploy-rwx.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: writers
+spec:
+  replicas: 4
+  selector:
+    matchLabels: {app: writers}
+  template:
+    metadata:
+      labels: {app: writers}
+    spec:
+      containers:
+      - name: w
+        image: busybox:1.36
+        command: ["sh", "-c", "while true; do echo \"$(date +%T) $(hostname) on $NODE\" >> /shared/log.txt; sleep 3; done"]
+        env:
+        - name: NODE
+          valueFrom:
+            fieldRef: {fieldPath: spec.nodeName}
+        volumeMounts:
+        - name: s
+          mountPath: /shared
+      volumes:
+      - name: s
+        persistentVolumeClaim:
+          claimName: shared
+
+k apply -f deploy-rwx.yaml
+k get pods -l app=writers -o wide       # spread over both workers
+sleep 15
+k exec deploy/writers -- tail -8 /shared/log.txt
+
+All pods on all nodes write to the same file: ReadWriteMany.
+Compare: Day 28 WordPress needed Recreate because its PVC was RWO.
+
+
+STEP 6: See the mounts on a node
+--------------------------------
+NODE=$(k get pod -l app=writers -o jsonpath='{.items[0].spec.nodeName}')
+docker exec $NODE sh -c "mount | grep nfs"
+Find the global staging mount and the per-pod bind mounts.
+
+
+STEP 7: Clean up and commit
+---------------------------
+k delete deploy writers ; k delete pvc shared ; k delete sc nfs-csi
+helm uninstall csi-driver-nfs -n kube-system ; k delete ns nfs
+cd ~/k8s-journey && git add . && git commit -m "day60: csi"

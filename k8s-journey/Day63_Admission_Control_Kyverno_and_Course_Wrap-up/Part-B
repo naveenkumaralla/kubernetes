@@ -1,0 +1,239 @@
+==================================================================
+DAY 63 - PART B: LAB
+Validate, mutate, and generate with Kyverno; one built-in VAP
+Time: 90-120 minutes
+==================================================================
+
+kubectx kind-lab
+mkdir -p ~/k8s-journey/week9/policy && cd $_
+
+
+STEP 1: Install Kyverno
+-----------------------
+helm repo add kyverno https://kyverno.github.io/kyverno/ && helm repo update
+helm install kyverno kyverno/kyverno -n kyverno --create-namespace
+k get pods -n kyverno
+k get crd | grep kyverno
+
+
+STEP 2: Validate: disallow ":latest" and untagged images
+--------------------------------------------------------
+vi disallow-latest.yaml
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+spec:
+  background: true
+  rules:
+  - name: require-image-tag
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+    exclude:
+      any:
+      - resources:
+          namespaces: [kube-system, kyverno]
+    validate:
+      failureAction: Enforce
+      message: "An image tag is required."
+      pattern:
+        spec:
+          containers:
+          - image: "*:*"
+  - name: disallow-latest
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+    exclude:
+      any:
+      - resources:
+          namespaces: [kube-system, kyverno]
+    validate:
+      failureAction: Enforce
+      message: "Using ':latest' is not allowed."
+      pattern:
+        spec:
+          containers:
+          - image: "!*:latest"
+
+k apply -f disallow-latest.yaml
+k run bad1 --image=nginx              # rejected (no tag)
+k run bad2 --image=nginx:latest       # rejected
+k run good --image=nginx:1.27         # allowed
+k create deploy bad3 --image=nginx    # Deployment allowed? Check pods:
+k get deploy bad3 ; k describe rs -l app=bad3 | grep -i -A3 "error\|denied"
+(Kyverno auto-generates rules for Deployments etc. from Pod rules, so
+the Deployment itself is usually rejected too.)
+
+If your Kyverno version rejects "failureAction" inside validate, use
+spec.validationFailureAction: Enforce instead.
+
+
+STEP 3: Audit mode and policy reports
+-------------------------------------
+vi require-labels.yaml
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-team-label
+spec:
+  background: true
+  rules:
+  - name: check-team
+    match:
+      any:
+      - resources:
+          kinds: [Deployment]
+    validate:
+      failureAction: Audit
+      message: "Deployments must have a 'team' label."
+      pattern:
+        metadata:
+          labels:
+            team: "?*"
+
+k apply -f require-labels.yaml
+k create deploy nolabel --image=nginx:1.27      # allowed (Audit)
+sleep 20
+k get policyreport -A
+k get policyreport -n default -o yaml | grep -B2 -A6 "result: fail" | head -30
+
+
+STEP 4: Mutate: add default labels and resources
+------------------------------------------------
+vi mutate-defaults.yaml
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-defaults
+spec:
+  rules:
+  - name: add-managed-by
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+    exclude:
+      any:
+      - resources:
+          namespaces: [kube-system, kyverno]
+    mutate:
+      patchStrategicMerge:
+        metadata:
+          labels:
+            +(managed-by): kyverno-lab
+        spec:
+          containers:
+          - (name): "*"
+            resources:
+              requests:
+                +(memory): "64Mi"
+                +(cpu): "50m"
+
+k apply -f mutate-defaults.yaml
+k run mutated --image=nginx:1.27
+k get pod mutated --show-labels
+k get pod mutated -o jsonpath='{.spec.containers[0].resources}{"\n"}'
+
+"+(key)" means "add only if not already set".
+
+
+STEP 5: Generate: default-deny NetworkPolicy in every new namespace
+-------------------------------------------------------------------
+vi generate-netpol.yaml
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: default-deny-for-new-namespaces
+spec:
+  rules:
+  - name: generate-default-deny
+    match:
+      any:
+      - resources:
+          kinds: [Namespace]
+    exclude:
+      any:
+      - resources:
+          names: [kube-system, kube-public, kube-node-lease, kyverno, default]
+    generate:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      name: default-deny
+      namespace: "{{request.object.metadata.name}}"
+      synchronize: true
+      data:
+        spec:
+          podSelector: {}
+          policyTypes: [Ingress]
+
+k apply -f generate-netpol.yaml
+k create ns team-green
+k get networkpolicy -n team-green          # created automatically
+k delete networkpolicy default-deny -n team-green
+k get networkpolicy -n team-green          # recreated (synchronize: true)
+
+(Kyverno needs RBAC to create NetworkPolicies; the Helm chart's
+default background controller permissions usually cover it. If the
+generate fails, check: k logs -n kyverno -l app.kubernetes.io/component=background-controller)
+
+
+STEP 6: Built-in ValidatingAdmissionPolicy (no Kyverno)
+-------------------------------------------------------
+vi vap-replicas.yaml
+
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: max-replicas
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["apps"]
+      apiVersions: ["v1"]
+      operations: ["CREATE", "UPDATE"]
+      resources: ["deployments"]
+  validations:
+  - expression: "object.spec.replicas <= 5"
+    message: "Deployments may not have more than 5 replicas in this lab."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: max-replicas-binding
+spec:
+  policyName: max-replicas
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: team-green
+
+k apply -f vap-replicas.yaml
+k create deploy big -n team-green --image=nginx:1.27 --replicas=10    # denied
+k create deploy ok  -n team-green --image=nginx:1.27 --replicas=3     # allowed
+
+
+STEP 7: Clean up and commit
+---------------------------
+k delete -f . --ignore-not-found
+k delete ns team-green ; k delete pod good mutated --ignore-not-found ; k delete deploy nolabel bad3 --ignore-not-found
+helm uninstall kyverno -n kyverno ; k delete ns kyverno
+cd ~/k8s-journey && git add . && git commit -m "day63: policy - course complete" && git push
+
+
+STEP 8: Final self-check
+------------------------
+Rebuild from nothing, without notes, in one sitting:
+  kind cluster with ingress -> your app via Helm or Kustomize -> TLS
+  with cert-manager -> Argo CD syncing from Git -> one alert in
+  Prometheus. Time yourself. That is the skill set of a junior
+  Kubernetes engineer.

@@ -1,0 +1,28 @@
+==================================================================
+DAY 42 - PART C: WEEK 6 SELF-TEST
+==================================================================
+
+1. For each fault you found: symptom, diagnosis command, fix, time.
+Ans:
+
+
+2. Total time to a healthy cluster:
+Ans:
+
+
+3. Which fault was the hardest to find, and why?
+Ans:
+
+
+4. Which faults did Kubernetes fix by itself? What does that say
+   about controllers?
+Ans:
+
+
+5. Write your personal "first 5 commands" when someone says "the
+   cluster is broken".
+Ans:
+
+
+6. Mistakes log: one error from this week and its fix.
+Ans:

@@ -1,0 +1,66 @@
+==================================================================
+DAY 54 - PART A: THEORY
+GitOps with Argo CD
+Time: 40 minutes
+==================================================================
+
+1. WHAT IS GITOPS?
+------------------
+  - The desired state of the cluster lives in GIT (YAML, Kustomize,
+    Helm values).
+  - An agent IN the cluster continuously PULLS from Git and applies
+    changes (reconciliation loop, again!).
+  - Nobody runs kubectl apply for deployments. To change the cluster,
+    you change Git (pull request, review, merge).
+  - Drift (someone runs kubectl edit) is detected and optionally
+    reverted automatically.
+Benefits: audit trail (git log), easy rollback (git revert), review,
+CI doesn't need cluster credentials, disaster recovery = point a new
+cluster at the repo.
+
+
+2. ARGO CD
+----------
+Components: API server + UI, repo-server (renders Helm/Kustomize),
+application-controller (compares and syncs), Redis, Dex (SSO).
+Core object: Application
+
+  apiVersion: argoproj.io/v1alpha1
+  kind: Application
+  metadata:
+    name: myapp-dev
+    namespace: argocd
+  spec:
+    project: default
+    source:
+      repoURL: https://github.com/<you>/k8s-journey.git
+      targetRevision: main
+      path: week8/kustomize/overlays/dev
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: kz-dev
+    syncPolicy:
+      automated:
+        prune: true       # delete things removed from Git
+        selfHeal: true    # revert manual changes
+      syncOptions:
+      - CreateNamespace=true
+
+Status: Sync (Synced/OutOfSync) + Health (Healthy/Progressing/Degraded).
+
+
+3. PATTERNS
+-----------
+  App of apps / ApplicationSet   generate many Applications (per env,
+                                 per cluster, per folder)
+  Environments                   one folder/overlay per env; promote by
+                                 changing the image tag in the next env
+  Flux CD                        the other popular GitOps tool (CNCF),
+                                 same ideas, no UI by default
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Git is the source of truth; the cluster pulls.
+- Argo CD Application = repo + path + destination + sync policy.
+- prune + selfHeal keep the cluster equal to Git.

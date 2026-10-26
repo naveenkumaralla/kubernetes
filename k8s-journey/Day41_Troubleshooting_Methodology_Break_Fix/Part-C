@@ -1,0 +1,39 @@
+==================================================================
+DAY 41 - PART C: CHECKPOINT
+Fill in the table for every scenario.
+==================================================================
+
+Format: Symptom | Command that revealed the cause | Root cause | Fix
+
+Scenario 1 (ImagePullBackOff):
+Ans:
+
+Scenario 2 (CrashLoopBackOff):
+Ans:
+
+Scenario 3 (Pending resources):
+Ans:
+
+Scenario 4 (Pending taint):
+Ans:
+
+Scenario 5 (no endpoints):
+Ans:
+
+Scenario 6 (kubelet stopped):
+Ans:
+
+Scenario 7 (runtime down):
+Ans:
+
+Scenario 8 (cgroup driver):
+Ans:
+
+Scenario 9 (API server typo):
+Ans:
+
+Scenario 10 (DNS):
+Ans:
+
+Which commands did you use the most? Make your personal top-10 list.
+Ans:

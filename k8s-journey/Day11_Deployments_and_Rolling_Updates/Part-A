@@ -1,0 +1,103 @@
+==================================================================
+DAY 11 - PART A: THEORY
+Deployments and Rolling Updates
+Time: 30-40 minutes
+==================================================================
+
+1. WHAT A DEPLOYMENT ADDS
+-------------------------
+Deployment = ReplicaSet + versioned updates.
+
+  Deployment  (you manage this)
+     |
+     +-- ReplicaSet v1  (old template)   0 pods
+     +-- ReplicaSet v2  (new template)   3 pods
+              |
+              +-- pods
+
+When you change the pod template (image, env, resources ...), the
+Deployment creates a NEW ReplicaSet and gradually moves pods from the
+old one to the new one. The old ReplicaSet is kept (with 0 replicas)
+so you can roll back.
+
+Deployments are the standard way to run stateless apps.
+
+
+2. DEPLOYMENT YAML
+------------------
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web
+  spec:
+    replicas: 3
+    selector:
+      matchLabels:
+        app: web
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 1          # up to 1 extra pod during update
+        maxUnavailable: 0    # never go below 3 ready pods
+    template:
+      metadata:
+        labels:
+          app: web
+      spec:
+        containers:
+        - name: web
+          image: nginx:1.26
+
+It looks exactly like a ReplicaSet plus "strategy".
+
+
+3. UPDATE STRATEGIES
+--------------------
+RollingUpdate (default)
+  Replace pods a few at a time. No downtime if the app has readiness
+  checks (Week 5).
+    maxSurge:        how many EXTRA pods allowed (number or %) default 25%
+    maxUnavailable:  how many pods can be NOT ready  default 25%
+
+  Example, replicas=4, maxSurge=1, maxUnavailable=0:
+    4 old -> 4 old + 1 new -> 3 old + 1 new -> 3 old + 2 new -> ...
+
+Recreate
+  Kill ALL old pods, then start new ones. Downtime, but never two
+  versions at once (useful when versions can't coexist, e.g. a DB
+  schema change).
+
+
+4. WHAT TRIGGERS A ROLLOUT?
+---------------------------
+Only changes to spec.template (pod template). Examples:
+  k set image deploy/web web=nginx:1.27
+  k set env deploy/web COLOR=blue
+  editing the template in YAML and applying
+  k rollout restart deploy/web   (adds an annotation -> new pods)
+
+Changing replicas does NOT create a new revision; it just scales.
+
+
+5. ROLLOUT COMMANDS
+-------------------
+  k rollout status deploy/web     wait and show progress
+  k rollout history deploy/web    list revisions
+  k rollout undo deploy/web       go back one revision (Day 12)
+  k rollout pause / resume deploy/web
+
+
+6. NAMES YOU WILL SEE
+---------------------
+  Deployment:  web
+  ReplicaSet:  web-7c5ddbdf54       (hash of the pod template)
+  Pod:         web-7c5ddbdf54-x8k2p
+The hash is also stored as the label "pod-template-hash".
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Deployment manages ReplicaSets; ReplicaSets manage pods.
+- Template change = new ReplicaSet = rolling update.
+- maxSurge / maxUnavailable control speed and safety.
+- Recreate = downtime but no mixed versions.

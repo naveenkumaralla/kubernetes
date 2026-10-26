@@ -1,0 +1,82 @@
+==================================================================
+DAY 15 - PART A: THEORY
+The Kubernetes Network Model
+Time: 30-40 minutes
+==================================================================
+
+1. THE THREE RULES
+------------------
+Kubernetes requires every network plugin to provide:
+  1) Every pod gets its own IP address.
+  2) Every pod can reach every other pod, on any node, WITHOUT NAT.
+  3) Agents on a node (kubelet) can reach all pods on that node.
+
+So a pod looks like a small VM on a flat network. No port mapping
+between pods (unlike Docker's -p on Day 4).
+
+
+2. HOW A POD GETS AN IP (on one node)
+-------------------------------------
+When the kubelet creates a pod:
+  - the "pause" container creates a network namespace
+  - the CNI plugin creates a veth pair: one end (eth0) inside the pod,
+    the other end on the node
+  - the plugin assigns an IP from the node's pod range (PodCIDR)
+
+    +-------- node --------+
+    |  pod A   pod B       |
+    |  eth0    eth0        |
+    |   |       |          |
+    |  vethX   vethY       |
+    |    \     /           |
+    |   routes / bridge    |
+    |       eth0 (node)    |
+    +----------------------+
+
+Each node owns a slice of the cluster pod network:
+  cluster pod CIDR  10.244.0.0/16
+  node 1            10.244.0.0/24
+  node 2            10.244.1.0/24
+  node 3            10.244.2.0/24
+
+
+3. POD TO POD ACROSS NODES
+--------------------------
+The CNI plugin makes "10.244.2.0/24 lives on node 3" known to every
+node. Ways to do it:
+  - Plain routes (kindnet, Calico BGP mode)
+  - Overlay tunnels: packets wrapped in VXLAN/Geneve (Flannel, Calico
+    VXLAN, Cilium)
+  - Cloud-native routing: pods get real VPC IPs (AWS VPC CNI, Azure
+    CNI) - Week 7
+
+
+4. WHY POD IPS ARE UNRELIABLE
+-----------------------------
+Pods are disposable. When a Deployment replaces a pod, the new pod
+gets a NEW IP. Scaling adds and removes IPs constantly.
+
+So you must never hard-code a pod IP. You need a stable address in
+front of a changing group of pods: a SERVICE (Day 16).
+
+
+5. THREE IP RANGES TO KNOW
+--------------------------
+  Node network     IPs of the machines   (kind: 172.18.0.x)
+  Pod network      IPs of pods           (kind: 10.244.0.0/16)
+  Service network  virtual IPs           (kind: 10.96.0.0/12)
+
+They must not overlap with each other or with your company network.
+
+
+6. CONTAINERS IN THE SAME POD
+-----------------------------
+Share one IP; they talk on localhost and must not use the same port
+(you saw this on Day 9).
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Each pod has its own IP; pods reach each other without NAT.
+- The CNI plugin wires it up (veth + routes or overlay).
+- Pod IPs change; use Services for stable addresses.

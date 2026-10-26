@@ -1,0 +1,86 @@
+==================================================================
+DAY 24 - PART A: THEORY
+Volumes: emptyDir, hostPath, and Why Pod Storage Is Ephemeral
+Time: 30-40 minutes
+==================================================================
+
+1. THE PROBLEM (AGAIN)
+----------------------
+Day 2: a container's writable layer disappears with the container.
+In Kubernetes it's worse: containers restart, pods get rescheduled to
+other nodes, Deployments replace pods all the time.
+
+A VOLUME is a directory mounted into a pod's containers whose lifetime
+is NOT tied to a single container.
+
+
+2. HOW VOLUMES ARE DECLARED
+---------------------------
+Two parts:
+  spec.volumes                         (pod level: what it is)
+  spec.containers[].volumeMounts       (container: where to mount)
+
+  spec:
+    volumes:
+    - name: scratch
+      emptyDir: {}
+    containers:
+    - name: app
+      volumeMounts:
+      - name: scratch
+        mountPath: /tmp/work
+        readOnly: false
+
+
+3. VOLUME TYPES BY LIFETIME
+---------------------------
+Lives as long as the POD:
+  emptyDir      empty directory created when the pod starts on a node;
+                shared by all containers in the pod; survives container
+                restarts; DELETED when the pod is removed.
+                emptyDir.medium: Memory -> tmpfs (RAM, counts against
+                memory limit). sizeLimit to cap usage.
+  configMap / secret / downwardAPI / projected   (Days 22-23)
+
+Lives as long as the NODE:
+  hostPath      a path on the node's filesystem. Data stays on that
+                node only. If the pod moves to another node, it sees
+                different (or no) data. Security risk: can expose the
+                node (/, /var/run/docker.sock). Used by system
+                DaemonSets (log collectors, CNI), avoid for apps.
+
+Lives independently (survives pods AND nodes):
+  persistentVolumeClaim   -> PV backed by network/cloud storage (Day 25)
+
+
+4. emptyDir USE CASES
+---------------------
+  - share files between containers in a pod (sidecar, Day 9)
+  - scratch space / cache
+  - checkpoint data that may survive a container crash (not pod loss)
+
+
+5. hostPath TYPES
+-----------------
+  type: Directory          must already exist
+  type: DirectoryOrCreate  create if missing
+  type: File / FileOrCreate / Socket ...
+
+
+6. EPHEMERAL STORAGE LIMITS
+---------------------------
+Container logs, writable layer and emptyDir use the node's disk
+("ephemeral storage"). You can request and limit it:
+  resources:
+    requests:
+      ephemeral-storage: 1Gi
+    limits:
+      ephemeral-storage: 2Gi
+Exceeding the limit = pod evicted.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- volumes (pod) + volumeMounts (container).
+- emptyDir dies with the pod; hostPath stays on one node.
+- Real persistence needs PersistentVolumes (tomorrow).

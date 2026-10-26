@@ -1,0 +1,34 @@
+==================================================================
+DAY 6 - PART C: CHECKPOINT
+Answer without looking at your notes.
+==================================================================
+
+1. List the 8 steps of the "kubectl run" flow from memory.
+Ans:
+
+
+2. Which two components act on a pod after it is first stored in etcd?
+Ans:
+
+
+3. What does "spec" represent? What does "status" represent? Who
+   writes each?
+Ans:
+
+
+4. Why didn't the pod come back after you deleted it?
+Ans:
+
+
+5. What does the "pause" container do?
+Ans:
+
+
+6. A pod shows ImagePullBackOff. What command do you run first, and
+   what do you look for?
+Ans:
+
+
+7. Why is it a good design that components watch the API server
+   instead of calling each other?
+Ans:

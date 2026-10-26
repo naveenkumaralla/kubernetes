@@ -1,0 +1,242 @@
+==================================================================
+DAY 27 - PART B: LAB
+Jobs, parallel jobs, failures, CronJobs
+Time: 90 minutes
+==================================================================
+
+cd ~/k8s-journey/manifests/week4
+
+
+STEP 1: A simple Job
+--------------------
+k create job hello --image=busybox:1.36 -- sh -c "echo Hello from a Job; sleep 5; echo done"
+k get jobs,pods -w        # Ctrl+C after Completed
+k logs job/hello
+k describe job hello | grep -E "Completions|Duration|Pods Statuses"
+
+
+STEP 2: Calculate pi (CPU work)
+-------------------------------
+vi job-pi.yaml
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pi
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: pi
+        image: perl:5.40
+        command: ["perl", "-Mbignum=bpi", "-wle", "print bpi(1000)"]
+
+k apply -f job-pi.yaml
+k wait --for=condition=complete job/pi --timeout=120s
+k logs job/pi | cut -c1-80
+
+After 5 minutes the Job deletes itself (ttlSecondsAfterFinished).
+
+
+STEP 3: Parallel Job with fixed completions
+-------------------------------------------
+vi job-parallel.yaml
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch
+spec:
+  completions: 6
+  parallelism: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: busybox:1.36
+        command: ["sh", "-c", "echo processing on $(hostname); sleep 8"]
+
+Terminal 2: k get pods -l job-name=batch -w
+k apply -f job-parallel.yaml
+
+Two pods at a time, six total. Change parallelism to 3 in the file,
+delete the Job, and run it again. Compare the total time:
+  k get job batch -o jsonpath='{.status.startTime} -> {.status.completionTime}{"\n"}'
+
+
+STEP 4: Indexed Job (process shards)
+------------------------------------
+vi job-indexed.yaml
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shards
+spec:
+  completions: 4
+  parallelism: 4
+  completionMode: Indexed
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: w
+        image: busybox:1.36
+        command: ["sh", "-c", "echo processing shard $JOB_COMPLETION_INDEX of 4"]
+
+k apply -f job-indexed.yaml
+k wait --for=condition=complete job/shards
+for p in $(k get pods -l job-name=shards -o name); do k logs $p; done
+
+
+STEP 5: Failures, retries, backoffLimit
+---------------------------------------
+vi job-fail.yaml
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: flaky
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: c
+        image: busybox:1.36
+        command: ["sh", "-c", "echo trying; exit 1"]
+
+k apply -f job-fail.yaml
+k get pods -l job-name=flaky -w        # new pod per attempt, growing delay
+k describe job flaky | tail -8           # BackoffLimitExceeded
+k get job flaky -o jsonpath='{.status.conditions[*].reason}{"\n"}'
+
+Change restartPolicy to OnFailure, delete and re-apply. Now there is
+ONE pod whose RESTARTS count grows. Which is easier to debug?
+
+
+STEP 6: Timeouts
+----------------
+k create job slow --image=busybox:1.36 --dry-run=client -o yaml -- sleep 300 > job-slow.yaml
+Add under spec:  activeDeadlineSeconds: 20
+k apply -f job-slow.yaml
+sleep 30 ; k describe job slow | grep -i -A2 deadline
+
+
+STEP 7: A random-failure Job that eventually succeeds
+-----------------------------------------------------
+k create job lucky --image=busybox:1.36 -- sh -c 'R=$((RANDOM % 3)); echo "roll=$R"; [ $R -eq 0 ]'
+k get pods -l job-name=lucky -w
+(busybox sh supports $RANDOM.) Read each attempt's logs.
+
+
+STEP 8: CronJob
+---------------
+vi cron-date.yaml
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ticker
+spec:
+  schedule: "*/1 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: tick
+            image: busybox:1.36
+            command: ["sh", "-c", "date; echo tick"]
+
+k apply -f cron-date.yaml
+k get cronjob ticker
+k get jobs -w             # a new Job every minute; only 3 kept
+
+Trigger one now without waiting:
+  k create job ticker-manual --from=cronjob/ticker
+  k logs job/ticker-manual
+
+Pause it:
+  k patch cronjob ticker -p '{"spec":{"suspend":true}}'
+
+
+STEP 9: concurrencyPolicy in action
+-----------------------------------
+Make each run take 90 s (longer than the 1-minute schedule):
+  k patch cronjob ticker --type=json -p '[{"op":"replace","path":"/spec/jobTemplate/spec/template/spec/containers/0/command","value":["sh","-c","date; sleep 90"]},{"op":"replace","path":"/spec/suspend","value":false}]'
+Watch for 4 minutes: k get jobs -w
+With Forbid, runs are skipped while one is active. Change to Allow and
+then Replace, and note the difference in Part C.
+
+
+STEP 10: A realistic backup CronJob (Postgres dump to a PVC)
+------------------------------------------------------------
+Recreate the pg StatefulSet from Day 26 (sts-postgres.yaml + secret),
+then:
+
+vi cron-pgdump.yaml
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backups
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pg-backup
+spec:
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: dump
+            image: postgres:16
+            env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pg
+                  key: POSTGRES_PASSWORD
+            command: ["sh", "-c", "pg_dump -h pg-0.pg -U postgres postgres > /backups/dump-$(date +%Y%m%d-%H%M%S).sql && ls -l /backups"]
+            volumeMounts:
+            - name: b
+              mountPath: /backups
+          volumes:
+          - name: b
+            persistentVolumeClaim:
+              claimName: backups
+
+k apply -f cron-pgdump.yaml
+Wait 2-4 minutes, then:
+  k logs job/$(k get jobs -o name | grep pg-backup | tail -1 | cut -d/ -f2)
+
+(Note: the backups PVC is RWO and local-path is per-node, so all
+backup pods will be scheduled onto the node holding the volume.)
+
+
+STEP 11: Clean up and commit
+----------------------------
+k delete cronjob ticker pg-backup
+k delete job --all
+k delete sts pg ; k delete svc pg ; k delete pvc --all ; k delete secret pg
+cd ~/k8s-journey && git add . && git commit -m "day27: jobs and cronjobs"

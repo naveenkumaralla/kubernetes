@@ -1,0 +1,88 @@
+==================================================================
+DAY 16 - PART A: THEORY
+Services: ClusterIP, Selectors, and Endpoints
+Time: 30-40 minutes
+==================================================================
+
+1. WHAT IS A SERVICE?
+---------------------
+A Service gives a group of pods:
+  - one stable virtual IP (ClusterIP) that never changes
+  - one stable DNS name
+  - load balancing across the healthy pods
+
+It finds its pods with a LABEL SELECTOR (same idea as ReplicaSets).
+
+
+2. A ClusterIP SERVICE
+----------------------
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: web
+  spec:
+    type: ClusterIP          # default; reachable only inside cluster
+    selector:
+      app: web               # send traffic to pods with this label
+    ports:
+    - name: http
+      port: 80               # port of the Service
+      targetPort: 8080       # port the container listens on
+
+port vs targetPort:
+  clients connect to   web:80
+  traffic goes to      <pod-ip>:8080
+targetPort can also be a NAMED port from the pod spec (e.g. "http").
+
+
+3. ENDPOINTSLICES
+-----------------
+The Service controller watches pods matching the selector and keeps a
+list of their IP:port in EndpointSlice objects.
+  - only READY pods are listed (readiness probes, Week 5)
+  - pods come and go -> list updates automatically
+
+  k get endpointslices -l kubernetes.io/service-name=web
+
+(Older object "Endpoints" still exists but is deprecated.)
+
+
+4. HOW TRAFFIC REALLY FLOWS
+---------------------------
+The ClusterIP is VIRTUAL: no interface has it, nothing listens on it.
+kube-proxy on every node watches Services and EndpointSlices and writes
+iptables (or IPVS/nftables) rules:
+
+  "packets to 10.96.45.12:80  ->  DNAT to one of
+                                  10.244.1.5:8080
+                                  10.244.2.7:8080"
+
+So the load balancing happens on the CLIENT's node, in the kernel.
+Same DNAT mechanism as Docker's -p (Day 4). Day 18 shows the rules.
+
+
+5. USEFUL OPTIONS
+-----------------
+sessionAffinity: ClientIP     same client -> same pod
+Headless Service (clusterIP: None)
+                              no virtual IP; DNS returns pod IPs
+                              directly (used by StatefulSets, Week 4)
+Service without selector      you manage endpoints yourself (e.g. to
+                              point at an external database)
+ExternalName                  DNS alias (CNAME) to an outside name
+
+
+6. SERVICE TYPES OVERVIEW
+-------------------------
+  ClusterIP      inside the cluster only (default)
+  NodePort       + a port on every node        (Day 18)
+  LoadBalancer   + a cloud load balancer       (Day 18, Week 7)
+  ExternalName   DNS alias only
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Service = stable IP + DNS + load balancing, via label selector.
+- port = Service port; targetPort = container port.
+- EndpointSlices list ready pod IPs; kube-proxy turns that into rules.
+- ClusterIP is virtual; you can't ping it.

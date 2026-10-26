@@ -1,0 +1,31 @@
+==================================================================
+DAY 12 - PART C: CHECKPOINT
+==================================================================
+
+1. Where is the revision number stored?
+Ans:
+
+
+2. How do you make CHANGE-CAUSE show something useful?
+Ans:
+
+
+3. Why did users not notice the broken image in Step 4?
+Ans:
+
+
+4. Does a Deployment roll back automatically when a rollout fails?
+   What happens instead?
+Ans:
+
+
+5. What happens to the revision number when you roll back?
+Ans:
+
+
+6. What does revisionHistoryLimit control?
+Ans:
+
+
+7. Why is "rollout status" useful in a CI/CD pipeline?
+Ans:

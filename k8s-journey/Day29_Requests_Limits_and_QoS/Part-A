@@ -1,0 +1,94 @@
+==================================================================
+DAY 29 - PART A: THEORY
+Resource Requests, Limits, and QoS Classes
+Time: 40 minutes
+==================================================================
+
+1. WHY THIS MATTERS
+-------------------
+Without resource settings, one buggy pod can eat all CPU or memory on
+a node and hurt every other pod there. The scheduler also has no idea
+how big a pod is, so it may pack too many onto one node.
+
+
+2. REQUESTS AND LIMITS
+----------------------
+  resources:
+    requests:          # what the pod is GUARANTEED / reserves
+      cpu: "250m"
+      memory: "128Mi"
+    limits:            # the MAXIMUM it may use
+      cpu: "500m"
+      memory: "256Mi"
+
+REQUESTS are used by the SCHEDULER: a node fits a pod only if
+  sum of requests on node + this request <= node allocatable.
+Requests are reservations, not usage: a node can be "full" with
+requests while CPUs sit idle.
+
+LIMITS are enforced by the KERNEL (cgroups, Day 2) at runtime.
+
+
+3. UNITS
+--------
+CPU:     1 = one core (vCPU).  "500m" = 0.5 core (millicores).
+Memory:  bytes. Use Mi/Gi (powers of 2): 128Mi, 1Gi.
+         Careful: "128M" (powers of 10) and "128m" (= 0.128 bytes!)
+         are different.
+
+
+4. CPU vs MEMORY BEHAVE DIFFERENTLY
+-----------------------------------
+CPU is COMPRESSIBLE:
+  over the limit -> THROTTLED (slowed down), never killed.
+  cgroup cpu.max = quota per 100ms period.
+MEMORY is NOT compressible:
+  over the limit -> OOMKilled (exit 137), container restarted.
+
+Many teams set a memory limit always, and CPU limit carefully (or not
+at all) because throttling causes latency spikes even when the node
+has idle CPU.
+
+
+5. QoS CLASSES
+--------------
+Kubernetes assigns each pod a Quality of Service class:
+
+  Guaranteed   every container has requests == limits for BOTH cpu
+               and memory
+  Burstable    at least one request or limit set, but not Guaranteed
+  BestEffort   nothing set at all
+
+When a NODE runs out of memory, the kubelet EVICTS pods in this order:
+  BestEffort first -> Burstable (using most above request) ->
+  Guaranteed last.
+
+  k get pod X -o jsonpath='{.status.qosClass}'
+
+
+6. NAMESPACE GUARDRAILS
+-----------------------
+LimitRange (per namespace):
+  default requests/limits for containers that don't set them,
+  plus min/max per container.
+ResourceQuota (per namespace):
+  total caps: requests.cpu, limits.memory, pods, services,
+  persistentvolumeclaims, requests.storage ...
+  Once a quota on cpu/memory exists, every new pod MUST specify
+  them (or get defaults from a LimitRange), otherwise it's rejected.
+
+
+7. MEASURING REAL USAGE
+-----------------------
+metrics-server collects CPU/memory from kubelets:
+  k top nodes
+  k top pods
+Set requests near typical usage, memory limit above peak.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Requests = scheduling; limits = enforcement.
+- CPU over limit = throttled; memory over limit = OOMKilled.
+- QoS decides who gets evicted first.
+- LimitRange = defaults per container; ResourceQuota = namespace total.

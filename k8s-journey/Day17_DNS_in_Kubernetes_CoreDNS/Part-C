@@ -1,0 +1,31 @@
+==================================================================
+DAY 17 - PART C: CHECKPOINT
+==================================================================
+
+1. Write the full DNS name for Service "db" in namespace "prod".
+Ans:
+
+
+2. Why does "backend" resolve inside namespace shop but not inside
+   frontend?
+Ans:
+
+
+3. Where is the DNS server's IP configured for a pod, and who writes it?
+Ans:
+
+
+4. What is the problem with ndots:5 for external names? Two fixes?
+Ans:
+
+
+5. What does nslookup return for a headless Service vs a normal one?
+Ans:
+
+
+6. DNS is broken but the Service works by IP. What do you check?
+Ans:
+
+
+7. Where is CoreDNS configured?
+Ans:

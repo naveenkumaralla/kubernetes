@@ -1,0 +1,80 @@
+==================================================================
+DAY 18 - PART A: THEORY
+NodePort, LoadBalancer, and How kube-proxy Works
+Time: 30-40 minutes
+==================================================================
+
+1. GETTING TRAFFIC FROM OUTSIDE
+-------------------------------
+ClusterIP is internal only. To reach an app from outside:
+
+  NodePort       opens the same port (30000-32767) on EVERY node
+                 client -> <any-node-ip>:31234 -> Service -> pod
+  LoadBalancer   NodePort + an external load balancer in front
+                 (cloud creates it; Week 7)
+  Ingress        one entry point, HTTP routing by host/path (Day 19)
+
+Each type builds on the previous:
+  LoadBalancer  ->  includes a NodePort  ->  includes a ClusterIP
+
+
+2. NodePort YAML
+----------------
+  spec:
+    type: NodePort
+    selector:
+      app: web
+    ports:
+    - port: 80          # ClusterIP port
+      targetPort: 8080  # container port
+      nodePort: 30080   # optional; random if omitted
+
+Downsides: odd port numbers, clients need node IPs, one Service per
+port. Good for labs and some on-prem setups.
+
+
+3. LoadBalancer
+---------------
+  spec:
+    type: LoadBalancer
+
+In a cloud, the cloud-controller-manager sees this and creates a real
+load balancer (AWS NLB, Azure LB, GCP LB), then writes its address in
+status.loadBalancer.ingress -> shown as EXTERNAL-IP.
+In kind or bare metal, nothing creates it, so EXTERNAL-IP stays
+<pending> unless you add something like MetalLB or cloud-provider-kind.
+
+
+4. externalTrafficPolicy
+------------------------
+  Cluster (default)  a node can forward to pods on OTHER nodes
+                     (extra hop, client IP replaced by SNAT)
+  Local              only to pods on the receiving node
+                     (keeps real client IP; nodes without pods fail
+                     health checks so the LB skips them)
+
+
+5. HOW kube-proxy WORKS
+-----------------------
+kube-proxy runs on every node (DaemonSet). It watches Services and
+EndpointSlices and programs the kernel. Modes:
+
+  iptables  (default in most clusters) chains of NAT rules
+  ipvs      kernel load balancer, better with thousands of Services
+  nftables  newer replacement for iptables (Kubernetes 1.31+)
+
+iptables chain walk for a ClusterIP:
+  KUBE-SERVICES             match destination ClusterIP:port
+   -> KUBE-SVC-XXXX         pick an endpoint at random (probability)
+       -> KUBE-SEP-AAAA     DNAT to 10.244.1.5:8080
+       -> KUBE-SEP-BBBB     DNAT to 10.244.2.7:8080
+NodePorts go through KUBE-NODEPORTS into the same KUBE-SVC chain.
+
+Some CNIs (Cilium) can replace kube-proxy entirely with eBPF.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- NodePort = port 30000-32767 on every node.
+- LoadBalancer = NodePort + external LB (needs a cloud or MetalLB).
+- kube-proxy writes NAT rules; it is not in the data path itself.

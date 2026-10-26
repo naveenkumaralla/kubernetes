@@ -1,0 +1,123 @@
+==================================================================
+DAY 40 - PART B: LAB
+Back up and restore etcd, then upgrade the cluster
+Time: 120 minutes
+==================================================================
+
+All commands on cp1 unless stated. Snapshot your VMs first!
+
+
+STEP 1: Install etcdctl/etcdutl matching your etcd
+--------------------------------------------------
+k get pod -n kube-system -l component=etcd -o jsonpath='{.items[0].spec.containers[0].image}{"\n"}'
+  -> e.g. registry.k8s.io/etcd:3.5.21-0  => ETCD_VER=v3.5.21
+ETCD_VER=v3.5.21
+curl -L https://github.com/etcd-io/etcd/releases/download/${ETCD_VER}/etcd-${ETCD_VER}-linux-amd64.tar.gz -o /tmp/etcd.tgz
+tar xzf /tmp/etcd.tgz -C /tmp
+sudo install /tmp/etcd-${ETCD_VER}-linux-amd64/etcdctl /tmp/etcd-${ETCD_VER}-linux-amd64/etcdutl /usr/local/bin/
+etcdctl version
+
+Helper:
+cat >> ~/.bashrc <<'EOF'
+alias e='sudo ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key'
+EOF
+source ~/.bashrc
+e endpoint health ; e member list -w table
+
+
+STEP 2: Create known state and take a snapshot
+----------------------------------------------
+k create ns before-backup
+k create deploy keepme -n before-backup --image=nginx:1.27 --replicas=2
+sudo mkdir -p /backup
+e snapshot save /backup/etcd-$(date +%F).db
+sudo etcdutl snapshot status /backup/etcd-$(date +%F).db -w table
+sudo tar czf /backup/pki-$(date +%F).tgz /etc/kubernetes/pki
+ls -lh /backup
+
+
+STEP 3: Make changes after the backup
+-------------------------------------
+k delete ns before-backup                     # "accidental" delete
+k create ns after-backup                      # new work
+k get ns
+
+
+STEP 4: Restore
+---------------
+SNAP=/backup/etcd-$(date +%F).db
+sudo mkdir -p /root/manifests-stopped
+sudo mv /etc/kubernetes/manifests/{kube-apiserver,etcd}.yaml /root/manifests-stopped/
+sleep 20 ; sudo crictl ps | grep -E "etcd|apiserver"     # gone
+
+sudo etcdutl snapshot restore $SNAP --data-dir /var/lib/etcd-restore
+sudo sed -i 's#path: /var/lib/etcd$#path: /var/lib/etcd-restore#' /root/manifests-stopped/etcd.yaml
+sudo grep -n "etcd-restore" /root/manifests-stopped/etcd.yaml   # hostPath changed
+
+sudo mv /root/manifests-stopped/{etcd,kube-apiserver}.yaml /etc/kubernetes/manifests/
+sudo systemctl restart kubelet
+sleep 60
+k get ns                   # before-backup is back, after-backup is gone
+k get deploy -n before-backup
+
+(If kubectl hangs: sudo crictl ps -a | grep etcd ; sudo crictl logs <id>)
+
+
+STEP 5: Plan the upgrade
+------------------------
+Current version:
+  k get nodes
+Switch the repo to the next minor (example v1.33 -> v1.34):
+
+Ubuntu:
+  sudo sed -i 's/v1.33/v1.34/' /etc/apt/sources.list.d/kubernetes.list
+  sudo apt-get update
+  sudo apt-cache madison kubeadm | head -3
+  sudo apt-mark unhold kubeadm && sudo apt-get install -y kubeadm='1.34.*' && sudo apt-mark hold kubeadm
+RHEL/Rocky:
+  sudo sed -i 's/v1.33/v1.34/g' /etc/yum.repos.d/kubernetes.repo
+  sudo dnf install -y kubeadm-'1.34.*' --disableexcludes=kubernetes
+
+kubeadm version
+sudo kubeadm upgrade plan        # read it: target versions, components
+
+
+STEP 6: Upgrade the control plane
+---------------------------------
+sudo kubeadm upgrade apply v1.34.x -y     # use the exact version from plan
+k get pods -n kube-system -o wide         # new static pod images
+
+k drain cp1 --ignore-daemonsets
+Ubuntu:
+  sudo apt-mark unhold kubelet kubectl && sudo apt-get install -y kubelet='1.34.*' kubectl='1.34.*' && sudo apt-mark hold kubelet kubectl
+RHEL:
+  sudo dnf install -y kubelet-'1.34.*' kubectl-'1.34.*' --disableexcludes=kubernetes
+sudo systemctl daemon-reload && sudo systemctl restart kubelet
+k uncordon cp1
+k get nodes                     # cp1 shows v1.34.x
+
+
+STEP 7: Upgrade each worker (one at a time)
+-------------------------------------------
+On worker1: switch repo, upgrade kubeadm (same as Step 5), then
+  sudo kubeadm upgrade node
+On cp1:
+  k drain worker1 --ignore-daemonsets --delete-emptydir-data
+On worker1: upgrade kubelet + kubectl (as in Step 6), then
+  sudo systemctl daemon-reload && sudo systemctl restart kubelet
+On cp1:
+  k uncordon worker1
+  k get nodes
+Repeat for worker2. Keep a curl loop running against the NodePort
+service from Day 39 during the worker upgrades: does it stay up?
+
+
+STEP 8: Verify and record
+-------------------------
+k get nodes -o wide
+k version
+sudo kubeadm certs check-expiration     # renewed by upgrade apply
+k get pods -A | grep -v Running
+
+Write a runbook ~/k8s-journey/kubeadm/upgrade-runbook.md with every
+command, then commit.

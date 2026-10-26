@@ -1,0 +1,31 @@
+==================================================================
+DAY 28 - PART C: WEEK 4 SELF-TEST
+==================================================================
+
+1. List every Kubernetes object you used in the project and its role.
+Ans:
+
+
+2. Why is MySQL a StatefulSet but WordPress a Deployment?
+Ans:
+
+
+3. Why did WordPress use the Recreate strategy?
+Ans:
+
+
+4. What would happen if you scaled WordPress to 3 replicas with this
+   PVC? How would you fix it? (Hint: RWX / object storage.)
+Ans:
+
+
+5. After "k delete ns wp", what was lost and why?
+Ans:
+
+
+6. What would you change to make this production-ready? (at least 4)
+Ans:
+
+
+7. Mistakes log: one storage/config error this week and its fix.
+Ans:

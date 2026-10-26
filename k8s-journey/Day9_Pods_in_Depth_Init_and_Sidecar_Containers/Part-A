@@ -1,0 +1,98 @@
+==================================================================
+DAY 9 - PART A: THEORY
+Pods in Depth: Multi-container Pods, Init Containers, Lifecycle
+Time: 30-40 minutes
+==================================================================
+
+1. WHAT A POD REALLY IS
+-----------------------
+A pod is a group of one or more containers that:
+  - share ONE network namespace (one IP, they talk via localhost)
+  - can share volumes
+  - are always scheduled together on the same node
+  - live and die together
+
+Remember the "pause" container from Day 6: it holds the network
+namespace; your containers join it.
+
+Most pods have ONE container. Use multiple containers only when they
+are tightly coupled helpers of the main app.
+
+
+2. MULTI-CONTAINER PATTERNS
+---------------------------
+Sidecar     Helper that runs alongside the app for its whole life.
+            Examples: log shipper, proxy (Envoy/Istio), config reloader.
+Ambassador  Proxy that the app talks to for outside connections.
+Adapter     Converts the app's output into a standard format
+            (e.g. metrics exporter).
+
+
+3. INIT CONTAINERS
+------------------
+Run BEFORE the app containers, one after another, each must finish
+successfully (exit 0). If one fails, the kubelet retries it.
+
+Uses:
+  - wait until a database/service is reachable
+  - download config or data into a shared volume
+  - run a DB migration or set file permissions
+
+  spec:
+    initContainers:
+    - name: wait-db
+      image: busybox:1.36
+      command: ["sh","-c","until nslookup db; do sleep 2; done"]
+    containers:
+    - name: app
+      image: myapp:v1
+
+
+4. NATIVE SIDECARS (Kubernetes 1.29+, GA in 1.33)
+-------------------------------------------------
+An init container with "restartPolicy: Always" becomes a sidecar:
+it starts before the app and keeps running, and stops after it.
+Older clusters simply list the sidecar as a second normal container.
+
+
+5. RESTART POLICY (pod level)
+-----------------------------
+  Always      (default) restart containers whenever they exit
+  OnFailure   restart only if exit code is not 0 (used by Jobs)
+  Never       never restart
+
+The kubelet restarts with an exponential back-off (10s, 20s, 40s ...
+up to 5 min). That waiting is the "BackOff" in CrashLoopBackOff.
+
+
+6. POD LIFECYCLE
+----------------
+Phase:          Pending -> Running -> Succeeded / Failed
+Container state: Waiting / Running / Terminated
+Conditions:     PodScheduled, Initialized, ContainersReady, Ready
+
+Lifecycle hooks:
+  postStart   runs right after a container starts
+  preStop     runs before a container is stopped (graceful drain)
+
+When a pod is deleted:
+  1. Pod marked Terminating, removed from Service endpoints
+  2. preStop hook runs (if any)
+  3. SIGTERM sent to PID 1 of each container
+  4. Wait terminationGracePeriodSeconds (default 30s)
+  5. SIGKILL if still running
+
+
+7. STATIC PODS AND BARE PODS
+----------------------------
+Bare pods (like ours) are not recreated if deleted. Static pods are
+created by the kubelet from files in /etc/kubernetes/manifests
+(the control plane uses this). Everything else uses controllers.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- Containers in a pod share IP (localhost) and can share volumes.
+- Init containers run first, in order, and must succeed.
+- restartPolicy + back-off explains CrashLoopBackOff.
+- Delete = SIGTERM, grace period, then SIGKILL.

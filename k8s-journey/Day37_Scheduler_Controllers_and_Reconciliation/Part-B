@@ -1,0 +1,116 @@
+==================================================================
+DAY 37 - PART B: LAB
+Watch the controllers and scheduler work
+Time: 75-90 minutes
+==================================================================
+
+STEP 1: Watch the chain of controllers
+--------------------------------------
+Terminal 2:
+  k get events -w --field-selector involvedObject.namespace=default
+
+Terminal 1:
+  k create deploy chain --image=nginx:1.27 --replicas=2
+
+Events appear in this order:
+  ScalingReplicaSet (deployment-controller)
+  SuccessfulCreate  (replicaset-controller)
+  Scheduled         (default-scheduler)
+  Pulling/Pulled/Created/Started (kubelet)
+
+Write down which component reported each.
+
+
+STEP 2: Owner references and cascading delete
+---------------------------------------------
+P=$(k get pod -l app=chain -o name | head -1)
+k get $P -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}{"\n"}'
+RS=$(k get rs -l app=chain -o name)
+k get $RS -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}{"\n"}'
+
+k delete deploy chain --cascade=orphan
+k get rs,pods -l app=chain       # still there, now ownerless
+k delete $RS                     # pods removed by GC
+
+
+STEP 3: Read the controller manager and scheduler logs
+------------------------------------------------------
+k logs -n kube-system kube-controller-manager-lab-control-plane --tail=20
+k create deploy logs-demo --image=nginx:1.27 --replicas=3
+k logs -n kube-system kube-controller-manager-lab-control-plane --tail=20 | grep -i logs-demo
+k logs -n kube-system kube-scheduler-lab-control-plane --tail=20
+k delete deploy logs-demo
+
+
+STEP 4: Stop the scheduler and see what breaks
+----------------------------------------------
+docker exec lab-control-plane mv /etc/kubernetes/manifests/kube-scheduler.yaml /root/
+sleep 15
+k get pods -n kube-system | grep scheduler       # gone
+
+k create deploy nosched --image=nginx:1.27 --replicas=2
+k get pods -l app=nosched -o wide                # Pending, NODE <none>
+k get rs -l app=nosched                          # RS created pods fine
+
+Controllers still work; only placement stopped.
+
+Bring it back:
+  docker exec lab-control-plane mv /root/kube-scheduler.yaml /etc/kubernetes/manifests/
+  sleep 20 ; k get pods -l app=nosched -o wide   # now scheduled
+
+
+STEP 5: Schedule by hand (be the scheduler)
+-------------------------------------------
+vi manual.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: manual
+spec:
+  nodeName: lab-worker2
+  containers:
+  - name: c
+    image: nginx:1.27
+k apply -f manual.yaml ; k get pod manual -o wide
+nodeName set = scheduler skipped entirely.
+
+
+STEP 6: Stop the controller manager
+-----------------------------------
+docker exec lab-control-plane mv /etc/kubernetes/manifests/kube-controller-manager.yaml /root/
+sleep 15
+k scale deploy nosched --replicas=4
+k get deploy nosched ; k get pods -l app=nosched   # still 2! No one acts
+k delete pod -l app=nosched                         # deleted, not replaced
+docker exec lab-control-plane mv /root/kube-controller-manager.yaml /etc/kubernetes/manifests/
+sleep 30 ; k get pods -l app=nosched                # reconciles to 4
+
+Level-triggered: it didn't need to "see" the events it missed; it
+compared desired and actual when it came back.
+
+
+STEP 7: Simulate a node failure
+-------------------------------
+k scale deploy nosched --replicas=6
+k get pods -l app=nosched -o wide
+docker stop lab-worker2
+k get nodes -w            # ~40 s: NotReady
+k describe node lab-worker2 | grep Taints
+k get pods -l app=nosched -o wide -w
+After ~5 minutes the pods on lab-worker2 go Terminating and new ones
+start on lab-worker. Note the timestamps.
+docker start lab-worker2
+k get nodes               # Ready again
+
+
+STEP 8: FailedScheduling messages
+---------------------------------
+k run toobig --image=nginx:1.27 --overrides='{"spec":{"containers":[{"name":"c","image":"nginx:1.27","resources":{"requests":{"cpu":"50"}}}]}}'
+k get events --field-selector reason=FailedScheduling
+Read the summary line and explain each part in Part C.
+
+
+STEP 9: Clean up and commit
+---------------------------
+k delete deploy nosched ; k delete pod manual toobig
+cd ~/k8s-journey && git add . && git commit -m "day37: controllers and scheduler"

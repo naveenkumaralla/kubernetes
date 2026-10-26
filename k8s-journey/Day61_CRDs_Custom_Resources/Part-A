@@ -1,0 +1,69 @@
+==================================================================
+DAY 61 - PART A: THEORY
+Custom Resource Definitions (CRDs)
+Time: 40 minutes
+==================================================================
+
+1. EXTENDING THE API
+--------------------
+You've already used many CRDs: Certificate (cert-manager),
+ServiceMonitor (Prometheus), Application (Argo CD), ScaledObject
+(KEDA), CiliumNetworkPolicy. A CRD teaches the API server a NEW
+resource type. After that, kubectl get/describe/apply/RBAC/watch all
+work for it, and it is stored in etcd like built-ins.
+
+
+2. A CRD
+--------
+  apiVersion: apiextensions.k8s.io/v1
+  kind: CustomResourceDefinition
+  metadata:
+    name: websites.lab.example.com        # <plural>.<group>
+  spec:
+    group: lab.example.com
+    scope: Namespaced
+    names:
+      kind: Website
+      plural: websites
+      singular: website
+      shortNames: [ws]
+    versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema: ...              # validation
+      subresources:
+        status: {}                        # separate status endpoint
+      additionalPrinterColumns: ...       # columns in kubectl get
+
+
+3. VALIDATION
+-------------
+openAPIV3Schema: types, required fields, enums, min/max, patterns,
+defaults. Plus CEL rules (x-kubernetes-validations) for cross-field
+checks, e.g. "self.replicas <= 10 || self.tier == 'premium'".
+Invalid objects are rejected by the API server.
+
+
+4. A CRD ALONE DOES NOTHING
+---------------------------
+It only stores data. A CONTROLLER watches the custom resources and
+acts (creates Deployments, calls cloud APIs, ...). CRD + controller
+with domain knowledge = OPERATOR (Day 62).
+Controllers are usually written in Go with kubebuilder /
+controller-runtime / Operator SDK; also possible in Python (kopf),
+Java, or even shell (for learning).
+
+
+5. VERSIONING
+-------------
+Multiple versions (v1alpha1, v1beta1, v1); one is the storage version;
+conversion webhooks translate between them.
+
+
+KEY POINTS TO REMEMBER
+----------------------
+- CRD = new API type with schema validation.
+- Controller = the logic; CRD + controller = operator.
+- Everything in kubectl works on custom resources.

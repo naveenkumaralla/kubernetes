@@ -1,0 +1,170 @@
+==================================================================
+DAY 52 - PART B: LAB
+Automatic TLS with cert-manager and your own CA
+Time: 90 minutes
+==================================================================
+
+mkdir -p ~/k8s-journey/week8/tls && cd $_
+
+
+STEP 1: Install cert-manager
+----------------------------
+helm repo add jetstack https://charts.jetstack.io && helm repo update
+helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace \
+  --set crds.enabled=true
+k get pods -n cert-manager
+k get crd | grep cert-manager
+
+
+STEP 2: A self-signed root CA, then a CA issuer
+-----------------------------------------------
+vi issuers.yaml
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lab-root-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: k8s-lab-root-ca
+  secretName: lab-root-ca
+  duration: 87600h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: lab-ca
+spec:
+  ca:
+    secretName: lab-root-ca
+
+k apply -f issuers.yaml
+k get clusterissuer
+k get certificate -n cert-manager      # READY True
+
+
+STEP 3: An app with an annotated Ingress
+----------------------------------------
+k create ns tls-demo
+helm upgrade --install web podinfo/podinfo -n tls-demo --set ui.message="TLS works"
+
+vi ingress-tls.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+  namespace: tls-demo
+  annotations:
+    cert-manager.io/cluster-issuer: lab-ca
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts: [secure.local]
+    secretName: secure-local-tls
+  rules:
+  - host: secure.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: web-podinfo
+            port:
+              number: 9898
+
+k apply -f ingress-tls.yaml
+k get certificate,certificaterequest -n tls-demo
+k describe certificate secure-local-tls -n tls-demo | tail -10
+k get secret secure-local-tls -n tls-demo
+
+(Check the Service name/port with: k get svc -n tls-demo)
+
+
+STEP 4: Trust the CA and test
+-----------------------------
+k get secret lab-root-ca -n cert-manager -o jsonpath='{.data.ca\.crt}' | base64 -d > lab-ca.crt
+openssl x509 -in lab-ca.crt -noout -subject
+
+curl --cacert lab-ca.crt --resolve secure.local:443:127.0.0.1 https://secure.local | grep -o "TLS works"
+curl -v --cacert lab-ca.crt --resolve secure.local:443:127.0.0.1 https://secure.local 2>&1 | grep -E "subject|issuer|expire"
+
+No -k needed: the chain verifies against your CA.
+(Optional: import lab-ca.crt into your browser/OS trust store.)
+
+
+STEP 5: Renewal
+---------------
+Make certificates short-lived to watch renewal:
+k annotate ingress web -n tls-demo cert-manager.io/duration=1h cert-manager.io/renew-before=59m --overwrite
+k delete secret secure-local-tls -n tls-demo     # force re-issue now
+k get certificate -n tls-demo -w
+k get certificate secure-local-tls -n tls-demo -o jsonpath='{.status.notAfter}{"  renew at: "}{.status.renewalTime}{"\n"}'
+
+Optional: install the cmctl CLI and run "cmctl renew secure-local-tls -n tls-demo".
+
+
+STEP 6: A Certificate object directly (internal use)
+----------------------------------------------------
+vi cert-internal.yaml
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-internal
+  namespace: tls-demo
+spec:
+  secretName: api-internal-tls
+  dnsNames:
+  - api.tls-demo.svc
+  - api.tls-demo.svc.cluster.local
+  duration: 720h
+  issuerRef:
+    name: lab-ca
+    kind: ClusterIssuer
+
+k apply -f cert-internal.yaml
+k get secret api-internal-tls -n tls-demo -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -ext subjectAltName
+
+
+STEP 7 (READ): Let's Encrypt in the cloud
+-----------------------------------------
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: you@example.com
+    privateKeySecretRef:
+      name: le-staging-key
+    solvers:
+    - http01:
+        ingress:
+          ingressClassName: nginx
+With a real domain pointing to your cloud ingress LB, annotate the
+Ingress with this issuer. Switch to the production server URL
+(https://acme-v02.api.letsencrypt.org/directory) once staging works.
+
+
+STEP 8: Clean up and commit
+---------------------------
+k delete ns tls-demo
+(keep cert-manager and the lab-ca issuer for the capstone)
+cd ~/k8s-journey && git add . && git commit -m "day52: cert-manager"

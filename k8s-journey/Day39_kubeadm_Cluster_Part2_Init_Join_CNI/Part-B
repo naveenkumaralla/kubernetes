@@ -1,0 +1,107 @@
+==================================================================
+DAY 39 - PART B: LAB
+Initialize the control plane, install Calico, join workers
+Time: 90-120 minutes
+==================================================================
+
+STEP 1: kubeadm init (on cp1)
+-----------------------------
+CP_IP=$(hostname -I | awk '{print $1}') ; echo $CP_IP
+sudo kubeadm init \
+  --pod-network-cidr=192.168.0.0/16 \
+  --apiserver-advertise-address=$CP_IP \
+  --control-plane-endpoint=cp1:6443 | tee ~/kubeadm-init.log
+
+Read the output carefully: each [phase] matches Part A. At the end it
+prints the "kubeadm join ..." command. It's saved in kubeadm-init.log.
+
+
+STEP 2: kubectl access (on cp1)
+-------------------------------
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+echo 'alias k=kubectl' >> ~/.bashrc ; echo 'source <(kubectl completion bash)' >> ~/.bashrc
+echo 'complete -o default -F __start_kubectl k' >> ~/.bashrc ; source ~/.bashrc
+
+k get nodes              # cp1 NotReady (no CNI)
+k get pods -n kube-system   # coredns Pending
+sudo ls /etc/kubernetes/manifests /etc/kubernetes/pki
+sudo crictl ps
+
+
+STEP 3: Install Calico (on cp1)
+-------------------------------
+Use the current Calico version (see docs.tigera.io quickstart):
+  CALICO=v3.30.3
+  k create -f https://raw.githubusercontent.com/projectcalico/calico/$CALICO/manifests/operator-crds.yaml
+  k create -f https://raw.githubusercontent.com/projectcalico/calico/$CALICO/manifests/tigera-operator.yaml
+  k create -f https://raw.githubusercontent.com/projectcalico/calico/$CALICO/manifests/custom-resources.yaml
+(Skip operator-crds.yaml if it returns 404 for your version.)
+
+custom-resources.yaml uses 192.168.0.0/16 by default, which matches
+our --pod-network-cidr. If your VM network overlaps 192.168.x.x,
+download the file, change the cidr AND re-init with a matching
+--pod-network-cidr (e.g. 10.244.0.0/16).
+
+k get pods -n calico-system -w
+k get nodes              # cp1 Ready
+
+
+STEP 4: Join the workers
+------------------------
+On worker1 and worker2, paste the join command from kubeadm-init.log
+(with sudo):
+  sudo kubeadm join cp1:6443 --token xxx --discovery-token-ca-cert-hash sha256:yyy
+
+Lost it or older than 24 h? On cp1:
+  kubeadm token create --print-join-command
+
+On cp1:
+  k get nodes -w            # workers NotReady -> Ready
+  k get csr                 # kubelet bootstrap CSRs auto-approved
+  k get nodes -o wide
+
+
+STEP 5: Label workers (cosmetic)
+--------------------------------
+k label node worker1 node-role.kubernetes.io/worker=
+k label node worker2 node-role.kubernetes.io/worker=
+k get nodes
+
+
+STEP 6: Test the cluster end to end
+-----------------------------------
+k create deploy hello --image=YOURUSER/myapp:v1 --replicas=3
+k expose deploy hello --type=NodePort --port=80 --target-port=5000
+k get pods -o wide
+NP=$(k get svc hello -o jsonpath='{.spec.ports[0].nodePort}')
+curl worker1:$NP ; curl worker2:$NP ; curl cp1:$NP
+
+DNS test:
+  k run t --rm -it --image=busybox:1.36 -- nslookup hello
+
+
+STEP 7: Explore what kubeadm created
+------------------------------------
+On cp1:
+  sudo cat /var/lib/kubelet/config.yaml | grep -E "cgroupDriver|clusterDNS|staticPodPath"
+  k get cm -n kube-system kubeadm-config -o yaml | head -40
+  sudo kubeadm certs check-expiration
+On worker1:
+  sudo ls /etc/kubernetes/          # kubelet.conf, pki/ca.crt only
+  sudo journalctl -u kubelet --no-pager | tail -5
+
+
+STEP 8: Copy kubeconfig to your workstation (optional)
+------------------------------------------------------
+scp cp1:~/.kube/config ~/.kube/kubeadm-lab.config
+KUBECONFIG=~/.kube/config:~/.kube/kubeadm-lab.config kubectl config view --flatten > /tmp/merged && mv /tmp/merged ~/.kube/config
+kubectx           # now you can switch between kind-lab and kubernetes-admin@kubernetes
+
+
+STEP 9: Snapshot and commit
+---------------------------
+Take VM snapshots ("cluster-up").
+Save init/join/CNI commands to ~/k8s-journey/kubeadm/cluster-build.sh
+cd ~/k8s-journey && git add . && git commit -m "day39: kubeadm cluster"
