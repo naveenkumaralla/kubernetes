@@ -4,33 +4,33 @@ Answer without looking at your notes.
 ==================================================================
 
 1. What is the only component that talks to etcd?
-Ans:
-
+Ans: kube-apiserver. Every other component (scheduler, controller-manager, kubelet, kubectl) goes through the API server.
 
 2. Which component decides which node a pod runs on?
-Ans:
-
+Ans: kube-scheduler. It filters the nodes that can run the pod, scores them, and writes the chosen node into the pod’s spec.nodeName.
 
 3. What does the kubelet do? Where does it run?
-Ans:
+Ans: The kubelet is an agent that runs as a systemd service on every node, including the control-plane node. It watches the API server for pods assigned to its node, tells the container runtime (containerd, through the CRI) to pull images and start the containers, runs the health probes, and reports the pod and node status back to the API server.
 
+Correction: it runs on every node, not just the workers. On the control plane, the kubelet is what starts the API server, etcd and the scheduler as static pods from /etc/kubernetes/manifests.
 
 4. Explain the reconciliation loop in your own words.
-Ans:
+Ans: You declare the desired state (for example “3 replicas”). Controllers keep comparing it with the actual state, and when the two differ they act to close the gap (for example by creating a missing pod). This repeats forever: observe, compare, fix. Most of these controllers (Deployment, ReplicaSet, Node, Job and others) run inside kube-controller-manager. The scheduler and the kubelet work the same way.
 
+Correction: the loop covers every kind of object (Deployments, nodes, Services and so on), not just pods. Also, controllers don’t validate requests; that’s the API server’s job. Controllers only fix differences.
 
-5. Why do you see the Kubernetes "nodes" as Docker containers in kind?
-Ans:
-
+5. Why do you see the Kubernetes “nodes” as Docker containers in kind?
+Ans: kind means “Kubernetes IN Docker”. It runs each node as a Docker container, and each of those containers holds systemd, the kubelet and containerd, so it behaves like a separate server. That lets you run a multi-node cluster on one machine quickly and cheaply for learning and testing. It isn’t real high availability, though, because all the nodes share one host.
 
 6. What is a context in kubeconfig?
-Ans:
+Ans: A context is a named combination of a cluster (the API server address and CA certificate), a user (the credentials) and, optionally, a default namespace. kubectl uses the current context to decide which cluster to talk to and as which user. Mine is kind-lab. I can switch with kubectl config use-context <name> or kubectx.
 
+Check it with: k config get-contexts and k config current-context
 
 7. Name the CNI plugin your kind cluster uses and the pod that runs it.
-Ans:
+Ans: kindnet. It runs as a DaemonSet in kube-system, so there’s one kindnet-xxxxx pod on each node.
 
+Check it with: k get ds -n kube-system and k get pods -n kube-system -o wide | grep kindnet
 
-8. Why can Kubernetes run an image you built with Docker or Podman
-   even though it uses containerd?
-Ans:
+8. Why can Kubernetes run an image you built with Docker or Podman even though it uses containerd?
+Ans: Docker, Podman and containerd all follow the same OCI (Open Container Initiative) standards for image format and registries. An image built by any of them is a standard OCI image, so containerd can pull it from a registry and run it. Kubernetes only needs a CRI runtime such as containerd or CRI-O to run it. The tool that built the image doesn’t matter.
